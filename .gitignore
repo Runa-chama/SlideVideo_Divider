@@ -1,0 +1,9 @@
+bin/
+obj/
+publish/
+output/
+models/
+.vs/
+*.user
+*.suo
+TestResults/
