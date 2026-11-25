@@ -1,6 +1,6 @@
 use crate::model::{PdfExportMode, PdfOptions, Project, Slide};
 use crate::project::normalize_transcript;
-use ab_glyph::{Font, FontArc, FontVec, PxScale, ScaleFont};
+use ab_glyph::{Font, FontArc, FontVec, PxScale, ScaleFont, VariableFont};
 use anyhow::{Context, Result};
 use image::{GenericImageView, ImageEncoder, Rgb, RgbImage};
 use imageproc::drawing::{draw_hollow_rect_mut, draw_line_segment_mut, draw_text_mut};
@@ -44,9 +44,10 @@ impl std::fmt::Display for PdfLayoutError {
 impl std::error::Error for PdfLayoutError {}
 
 pub fn export(project: &Project, output_path: &Path, options: PdfOptions) -> Result<()> {
-    let font = FontVec::try_from_vec(FONT_BYTES.to_vec())
-        .map(FontArc::from)
-        .context("同梱フォントを読み込めませんでした")?;
+    let mut font_vec =
+        FontVec::try_from_vec(FONT_BYTES.to_vec()).context("同梱フォントを読み込めませんでした")?;
+    font_vec.set_variation(b"wght", 650.0);
+    let font = FontArc::from(font_vec);
     let mut document = PdfDocument::new(&format!("{} スライドノート", project.video_name));
     let mut overflow = Vec::new();
     for slide in &project.slides {
@@ -347,9 +348,9 @@ fn draw_line(canvas: &mut RgbImage, x1: f64, y1: f64, x2: f64, y2: f64, color: R
 }
 
 fn font() -> FontArc {
-    FontVec::try_from_vec(FONT_BYTES.to_vec())
-        .map(FontArc::from)
-        .expect("bundled font must load")
+    let mut font = FontVec::try_from_vec(FONT_BYTES.to_vec()).expect("bundled font must load");
+    font.set_variation(b"wght", 650.0);
+    FontArc::from(font)
 }
 
 fn format_time(seconds: f64) -> String {

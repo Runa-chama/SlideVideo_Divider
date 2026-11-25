@@ -162,10 +162,20 @@ impl SlideVideoDividerApp {
             visuals.window_corner_radius = CornerRadius::same(8);
             visuals.menu_corner_radius = CornerRadius::same(6);
         }
+        visuals.weak_text_alpha = 0.85;
         ctx.set_visuals(visuals);
         ctx.all_styles_mut(|style| {
             style.spacing.item_spacing = vec2(7.0, 6.0);
             style.spacing.button_padding = vec2(9.0, 4.0);
+            style
+                .text_styles
+                .insert(egui::TextStyle::Body, egui::FontId::proportional(15.0));
+            style
+                .text_styles
+                .insert(egui::TextStyle::Small, egui::FontId::proportional(13.0));
+            style
+                .text_styles
+                .insert(egui::TextStyle::Monospace, egui::FontId::monospace(14.0));
         });
     }
 
@@ -223,33 +233,38 @@ impl SlideVideoDividerApp {
                 .show(ui, |ui| {
                     ui.heading("音声付きスライド動画をノートPDFへ変換");
                     ui.separator();
-                    egui::Grid::new("convert-grid")
-                        .num_columns(3)
-                        .spacing([8.0, 8.0])
-                        .show(ui, |ui| {
-                            ui.label("動画ファイル");
-                            ui.add(TextEdit::singleline(&mut self.video_path).desired_width(620.0));
-                            if ui.button("参照...").clicked()
-                                && let Some(path) = rfd::FileDialog::new()
-                                    .add_filter("動画", &["mp4", "mov", "mkv", "webm", "avi"])
-                                    .pick_file()
-                            {
-                                self.video_path = path.to_string_lossy().to_string();
-                            }
-                            ui.end_row();
+                    ui.horizontal(|ui| {
+                        ui.add_sized(
+                            vec2(110.0, ui.spacing().interact_size.y),
+                            egui::Label::new("動画ファイル"),
+                        );
+                        ui.add(
+                            TextEdit::singleline(&mut self.video_path).desired_width(f32::INFINITY),
+                        );
+                        if ui.button("参照...").clicked()
+                            && let Some(path) = rfd::FileDialog::new()
+                                .add_filter("動画", &["mp4", "mov", "mkv", "webm", "avi"])
+                                .pick_file()
+                        {
+                            self.video_path = path.to_string_lossy().to_string();
+                        }
+                    });
 
-                            ui.label("出力フォルダ");
-                            ui.add(
-                                TextEdit::singleline(&mut self.output_directory)
-                                    .desired_width(620.0),
-                            );
-                            if ui.button("参照...").clicked()
-                                && let Some(path) = rfd::FileDialog::new().pick_folder()
-                            {
-                                self.output_directory = path.to_string_lossy().to_string();
-                            }
-                            ui.end_row();
-                        });
+                    ui.horizontal(|ui| {
+                        ui.add_sized(
+                            vec2(110.0, ui.spacing().interact_size.y),
+                            egui::Label::new("出力フォルダ"),
+                        );
+                        ui.add(
+                            TextEdit::singleline(&mut self.output_directory)
+                                .desired_width(f32::INFINITY),
+                        );
+                        if ui.button("参照...").clicked()
+                            && let Some(path) = rfd::FileDialog::new().pick_folder()
+                        {
+                            self.output_directory = path.to_string_lossy().to_string();
+                        }
+                    });
                     ui.label(RichText::new("MP4 / MOV / MKV / WebM に対応。").weak());
 
                     ui.separator();
@@ -286,7 +301,8 @@ impl SlideVideoDividerApp {
                             ui.label("モデルファイル");
                             ui.horizontal(|ui| {
                                 ui.add(
-                                    TextEdit::singleline(&mut self.model_path).desired_width(430.0),
+                                    TextEdit::singleline(&mut self.model_path)
+                                        .desired_width(f32::INFINITY),
                                 );
                                 if ui.button("参照...").clicked()
                                     && let Some(path) = rfd::FileDialog::new()
@@ -1392,10 +1408,10 @@ fn apply_title_bar(_frame: &Frame, _dark: bool) {}
 
 fn install_fonts(ctx: &Context) {
     let mut fonts = egui::FontDefinitions::default();
-    fonts.font_data.insert(
-        "M PLUS 1p".to_string(),
-        egui::FontData::from_static(FONT_BYTES).into(),
-    );
+    let mut tweak = egui::FontTweak::default();
+    tweak.coords.push(b"wght", 650.0);
+    let font = egui::FontData::from_static(FONT_BYTES).tweak(tweak);
+    fonts.font_data.insert("M PLUS 1p".to_string(), font.into());
     fonts
         .families
         .get_mut(&egui::FontFamily::Proportional)
