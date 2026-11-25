@@ -1,4 +1,6 @@
 using System.Globalization;
+using System.Reflection;
+using System.Runtime.InteropServices;
 using Whisper.net;
 using Whisper.net.Ggml;
 using Whisper.net.LibraryLoader;
@@ -64,6 +66,7 @@ public static class TranscriptionService
             throw new FileNotFoundException("音声認識モデルが見つかりません。先にモデルをダウンロードしてください。", modelPath);
         }
 
+        ConfigureNativeLibrary(useGpu);
         RuntimeOptions.RuntimeLibraryOrder = useGpu
             ? [RuntimeLibrary.Cuda, RuntimeLibrary.Cpu, RuntimeLibrary.CpuNoAvx]
             : [RuntimeLibrary.Cpu, RuntimeLibrary.CpuNoAvx];
@@ -115,6 +118,58 @@ public static class TranscriptionService
         }
 
         return segments;
+    }
+
+    private static void ConfigureNativeLibrary(bool useGpu)
+    {
+        var entryAssemblyName = Assembly.GetEntryAssembly()?.GetName().Name;
+        if (string.IsNullOrWhiteSpace(entryAssemblyName))
+        {
+            return;
+        }
+
+        var extractionBase = Environment.GetEnvironmentVariable("DOTNET_BUNDLE_EXTRACT_BASE_DIR");
+        var extractionRoots = new List<string>();
+        if (!string.IsNullOrWhiteSpace(extractionBase))
+        {
+            extractionRoots.Add(Path.Combine(extractionBase, entryAssemblyName));
+        }
+        extractionRoots.Add(Path.Combine(Path.GetTempPath(), ".net", entryAssemblyName));
+
+        var localRuntimeDirectory = Path.Combine(
+            AppContext.BaseDirectory, "runtimes",
+            useGpu ? "cuda" : string.Empty,
+            $"win-{RuntimeInformation.ProcessArchitecture.ToString().ToLowerInvariant()}");
+        if (Directory.Exists(localRuntimeDirectory))
+        {
+            return;
+        }
+
+        var separator = Path.DirectorySeparatorChar;
+        var nativeLibrary = extractionRoots
+            .Where(Directory.Exists)
+            .SelectMany(root => Directory.EnumerateFiles(root, "whisper.dll", SearchOption.AllDirectories))
+            .Where(path => path.Contains($"{separator}win-x64{separator}", StringComparison.OrdinalIgnoreCase))
+            .Where(path => useGpu
+                ? path.Contains($"{separator}cuda{separator}", StringComparison.OrdinalIgnoreCase)
+                : !path.Contains($"{separator}cuda{separator}", StringComparison.OrdinalIgnoreCase))
+            .OrderByDescending(File.GetLastWriteTimeUtc)
+            .FirstOrDefault();
+
+        if (nativeLibrary is not null)
+        {
+            var runtimeDirectory = new DirectoryInfo(Path.GetDirectoryName(nativeLibrary)!);
+            while (runtimeDirectory is not null &&
+                   !string.Equals(runtimeDirectory.Name, "runtimes", StringComparison.OrdinalIgnoreCase))
+            {
+                runtimeDirectory = runtimeDirectory.Parent;
+            }
+
+            if (runtimeDirectory?.Parent is not null)
+            {
+                RuntimeOptions.LibraryPath = Path.Combine(runtimeDirectory.Parent.FullName, "whisper.dll");
+            }
+        }
     }
 
     public static string FormatBytes(long bytes)
