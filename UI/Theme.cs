@@ -1,6 +1,6 @@
 using System.Drawing.Drawing2D;
 
-namespace SlideTranscriber.UI;
+namespace SlideVideoDivider.UI;
 
 public sealed record UiPalette
 {

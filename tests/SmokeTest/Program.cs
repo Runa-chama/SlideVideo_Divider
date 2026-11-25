@@ -2,12 +2,12 @@ using System.Diagnostics;
 using System.Drawing;
 using System.Drawing.Imaging;
 using System.Runtime.InteropServices;
-using SlideTranscriber.Core;
+using SlideVideoDivider.Core;
 
 if (args.Contains("--capture-ui") || args.Contains("--capture-notes"))
 {
     var captureNotes = args.Contains("--capture-notes");
-    var exe = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", "bin", "Release", "net10.0-windows", "SlideTranscriber.exe"));
+    var exe = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", "bin", "Release", "net10.0-windows", "SlideVideoDivider.exe"));
     var initialProjectPath = Directory.EnumerateFiles(AppContext.BaseDirectory, "*_project.json", SearchOption.AllDirectories).FirstOrDefault();
     using var process = captureNotes && initialProjectPath is not null
         ? Process.Start(exe, initialProjectPath) ?? throw new InvalidOperationException("Failed to start app")
@@ -41,10 +41,10 @@ if (args.Contains("--capture-ui") || args.Contains("--capture-notes"))
 var videoArgumentIndex = Array.IndexOf(args, "--video");
 var videoPath = videoArgumentIndex >= 0 && videoArgumentIndex + 1 < args.Length
     ? args[videoArgumentIndex + 1]
-    : Environment.GetEnvironmentVariable("SLIDE_TRANSCRIBER_TEST_VIDEO");
+    : Environment.GetEnvironmentVariable("SLIDEVIDEODIVIDER_TEST_VIDEO");
 if (string.IsNullOrWhiteSpace(videoPath) || !File.Exists(videoPath))
 {
-    Console.WriteLine("No test video specified. Use --video <path> or set SLIDE_TRANSCRIBER_TEST_VIDEO.");
+    Console.WriteLine("No test video specified. Use --video <path> or set SLIDEVIDEODIVIDER_TEST_VIDEO.");
     return;
 }
 var video = Path.GetFullPath(videoPath);
@@ -74,14 +74,58 @@ var project = new SlideProject
     ]
 };
 TranscriptAligner.AssignTranscripts(project);
+if (TranscriptAligner.NormalizeTranscript("一行目\n\n二行目\n \n三行目") != $"一行目{Environment.NewLine}二行目{Environment.NewLine}三行目")
+{
+    throw new InvalidOperationException("Transcript blank-line normalization failed.");
+}
+
+var history = new EditHistory();
+var historyValue = 0;
+history.Push(new EditAction
+{
+    Description = "test",
+    Undo = () => historyValue--,
+    Redo = () => historyValue++
+});
+historyValue++;
+history.Undo();
+history.Redo();
+if (historyValue != 1 || !history.CanUndo || history.CanRedo)
+{
+    throw new InvalidOperationException("Edit history failed.");
+}
+
 var projectPath = ProjectStore.GetDefaultProjectPath(output, video);
 ProjectStore.Save(projectPath, project);
 var loaded = ProjectStore.Load(projectPath);
 Console.WriteLine($"Project round-trip: {loaded.Slides.Count} slides");
 
-var pdfPath = Path.Combine(output, "smoke.pdf");
-await PdfExporter.ExportAsync(project, pdfPath);
-Console.WriteLine($"PDF: {pdfPath} ({new FileInfo(pdfPath).Length / 1024.0:F1} KB)");
+foreach (var mode in Enum.GetValues<PdfExportMode>())
+{
+    var modePath = Path.Combine(output, $"smoke_{mode}.pdf");
+    await PdfExporter.ExportAsync(project, modePath, new PdfExportOptions(mode, 6.5));
+    Console.WriteLine($"PDF ({mode}): {modePath} ({new FileInfo(modePath).Length / 1024.0:F1} KB)");
+}
+
+var originalTranscript = project.Slides[0].Transcript;
+project.Slides[0].Transcript = new string('あ', 15000);
+try
+{
+    await PdfExporter.ExportAsync(project, Path.Combine(output, "overflow.pdf"),
+        new PdfExportOptions(PdfExportMode.TranscriptsOnly, 5.0));
+    throw new InvalidOperationException("Expected PDF layout overflow was not detected.");
+}
+catch (PdfLayoutException ex)
+{
+    if (ex.MinimumFontSize != 5.0 || !ex.SlideNumbers.Contains(project.Slides[0].Number))
+    {
+        throw new InvalidOperationException("PDF layout overflow reporting failed.");
+    }
+}
+finally
+{
+    project.Slides[0].Transcript = originalTranscript;
+}
 
 if (args.Contains("--whisper") || args.Contains("--full-whisper"))
 {
@@ -114,6 +158,10 @@ if (args.Contains("--whisper") || args.Contains("--full-whisper"))
         TranscriptAligner.AssignTranscripts(project);
         Console.WriteLine($"Slides with text: {project.Slides.Count(s => !string.IsNullOrWhiteSpace(s.Transcript))}/{project.Slides.Count}");
         Console.WriteLine($"Max transcript length: {project.Slides.Max(s => s.Transcript.Length)}");
+        if (project.Slides.Any(s => s.Transcript.Contains("\n\n", StringComparison.Ordinal)))
+        {
+            throw new InvalidOperationException("Transcript contains blank lines after alignment.");
+        }
     }
 }
 

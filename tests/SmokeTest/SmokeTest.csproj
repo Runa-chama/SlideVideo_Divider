@@ -7,6 +7,6 @@
     <Nullable>enable</Nullable>
   </PropertyGroup>
   <ItemGroup>
-    <ProjectReference Include="..\..\SlideTranscriber.csproj" />
+    <ProjectReference Include="..\..\SlideVideoDivider.csproj" />
   </ItemGroup>
 </Project>

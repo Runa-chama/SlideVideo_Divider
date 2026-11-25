@@ -5,7 +5,7 @@ using Whisper.net;
 using Whisper.net.Ggml;
 using Whisper.net.LibraryLoader;
 
-namespace SlideTranscriber.Core;
+namespace SlideVideoDivider.Core;
 
 public static class TranscriptionService
 {

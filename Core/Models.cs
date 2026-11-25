@@ -1,7 +1,7 @@
 using System.Text.Json.Serialization;
 using Whisper.net.Ggml;
 
-namespace SlideTranscriber.Core;
+namespace SlideVideoDivider.Core;
 
 public sealed class TranscriptSegment
 {

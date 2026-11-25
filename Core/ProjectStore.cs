@@ -2,7 +2,7 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 
-namespace SlideTranscriber.Core;
+namespace SlideVideoDivider.Core;
 
 public static class ProjectStore
 {
@@ -66,6 +66,7 @@ public static class ProjectStore
             slide.ImagePath = Path.IsPathRooted(slide.ImagePath)
                 ? slide.ImagePath
                 : Path.GetFullPath(Path.Combine(directory, slide.ImagePath));
+            slide.Transcript = TranscriptAligner.NormalizeTranscript(slide.Transcript);
         }
 
         project.Renumber();

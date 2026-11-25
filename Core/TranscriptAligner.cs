@@ -1,4 +1,4 @@
-namespace SlideTranscriber.Core;
+namespace SlideVideoDivider.Core;
 
 public static class TranscriptAligner
 {
@@ -17,7 +17,7 @@ public static class TranscriptAligner
                 continue;
             }
 
-            var text = segment.Text.Trim();
+            var text = NormalizeTranscript(segment.Text);
             if (string.IsNullOrEmpty(text))
             {
                 continue;
@@ -25,8 +25,27 @@ public static class TranscriptAligner
 
             slide.Transcript = string.IsNullOrWhiteSpace(slide.Transcript)
                 ? text
-                : slide.Transcript + Environment.NewLine + Environment.NewLine + text;
+                : slide.Transcript + Environment.NewLine + text;
         }
+
+        foreach (var slide in project.Slides)
+        {
+            slide.Transcript = NormalizeTranscript(slide.Transcript);
+        }
+    }
+
+    public static string NormalizeTranscript(string? text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            return string.Empty;
+        }
+
+        var normalized = text.Replace("\r\n", "\n").Replace('\r', '\n');
+        var lines = normalized.Split('\n')
+            .Select(line => line.Trim())
+            .Where(line => line.Length > 0);
+        return string.Join(Environment.NewLine, lines);
     }
 
     private static SlideItem? FindBestSlide(IReadOnlyList<SlideItem> slides, double start, double end)

@@ -1,6 +1,6 @@
-using SlideTranscriber.UI;
+using SlideVideoDivider.UI;
 
-namespace SlideTranscriber;
+namespace SlideVideoDivider;
 
 internal static class Program
 {
@@ -24,7 +24,7 @@ internal static class Program
         try
         {
             var directory = Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "SlideTranscriber");
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "SlideVideoDivider");
             Directory.CreateDirectory(directory);
             File.WriteAllText(Path.Combine(directory, "error.log"), exception.ToString());
         }
@@ -33,6 +33,6 @@ internal static class Program
             // Logging must never hide the original error dialog.
         }
 
-        MessageBox.Show(exception.Message, "Slide Transcriber エラー", MessageBoxButtons.OK, MessageBoxIcon.Error);
+        MessageBox.Show(exception.Message, "SlideVideoDivider エラー", MessageBoxButtons.OK, MessageBoxIcon.Error);
     }
 }

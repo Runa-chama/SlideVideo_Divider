@@ -1,16 +1,31 @@
-# Slide Transcriber
+# SlideVideoDivider
 
-音声付きのスライド動画を、**上半分にスライド画像・下半分に文字起こし**を配置したA4縦のノートPDFへ変換するWindowsアプリです。
+音声付きのスライド動画を、スライド画像と文字起こしのPDFへ変換するWindowsアプリです。
 
 Pythonは使用しません。.NET WinForms、Whisper.net（whisper.cppベース）、FFmpeg、PDFsharpで構成されています。
 
 ## 画面
 
-- ダーク／ライトテーマ
+- ダーク／ライトテーマ（設定タブで切り替え）
 - 上部タブ、下部ステータスバー
 - スライド一覧・プレビュー・文字起こし編集の3ペイン
 - スライドの中点分割、削除、画像差し替え、文字の前後移動
+- 操作履歴のUndo／Redo
 - プロジェクトの保存・再開
+
+## 操作履歴
+
+以下の操作を「元に戻す」「やり直し」できます。
+
+- 文字を前へ
+- 文字を次へ
+- 画像差し替え
+
+ショートカット：
+
+- `Ctrl+Z`：元に戻す
+- `Ctrl+Y`：やり直し
+- `Ctrl+Shift+Z`：やり直し
 
 ## 動作要件
 
@@ -27,8 +42,8 @@ GPUがなくてもCPUで動作しますが、処理時間は長くなります�
 ```powershell
 git clone https://github.com/Runa-chama/SlideVideo_Divider.git
 cd SlideVideo_Divider
-dotnet build -c Release
-dotnet run --project SlideTranscriber.csproj -c Release
+dotnet build SlideVideoDivider.slnx -c Release
+dotnet run --project SlideVideoDivider.csproj -c Release
 ```
 
 単体exeとして配布する場合：
@@ -37,7 +52,7 @@ dotnet run --project SlideTranscriber.csproj -c Release
 .\publish.ps1
 ```
 
-出力先は `publish\SlideTranscriber.exe` です。音声認識モデルはexeに含めず、初回利用時にダウンロードします。
+出力先は `publish\SlideVideoDivider.exe` です。音声認識モデルはexeに含めず、初回利用時にダウンロードします。
 
 ## 使い方
 
@@ -49,7 +64,7 @@ dotnet run --project SlideTranscriber.csproj -c Release
 4. 必要に応じてスライド検出しきい値・専門用語ヒントを調整
 5. 「変換開始」
 6. 完了後、「スライドノート」タブで内容を確認・修正
-7. 「PDF出力」
+7. 「PDF出力」で出力モードを選択
 
 ## 出力
 
@@ -67,16 +82,27 @@ PDFは必要に応じて好きな場所へ保存できます。
 
 `*_project.json` は「開く」ボタン、またはexeへドラッグ＆ドロップして再開できます。画像はプロジェクトフォルダからの相対パスで保存されます。
 
-## PDF仕様
+## PDF出力オプション
 
-- A4縦
-- 上半分：スライド画像を16:9のまま中央配置
-- 下半分：対応する日本語文字起こし
-- スライド番号・表示時間を表記
-- 文字量に応じて自動でフォント縮小
-- 最小サイズでも収まらない場合はPDF出力を中止し、該当スライドを警告
+PDF出力前にダイヤログが表示されます。
+
+- **スライド＋文字起こし（既定）**
+  - 上半分にスライド、下半分に文字起こし
+- **スライドのみ**
+  - スライド画像だけのPDF
+- **文字起こしのみ**
+  - 文字起こしだけのPDF
+
+すべてA4縦で、1スライド＝1ページです。
+
+最小フォントサイズは「設定」タブ、またはPDF出力ダイヤログで変更できます。既定値は `6.5pt` です。収まらない場合は該当スライドと現在の最小サイズを警告します。
 
 軽量化と日本語フォントの安定表示のため、PDF内の文字起こしは画像としてレンダリングされます。検索・コピーはできません。元の文字はプロジェクトJSONと編集画面に残ります。
+
+## 文字起こしの整形
+
+- 発話の間に空行を挿入しません
+- 既存プロジェクト読み込み時も空行を自動除去します
 
 ## 処理の流れ
 
@@ -85,7 +111,7 @@ PDFは必要に応じて好きな場所へ保存できます。
 3. FFmpegで音声を16kHzモノラルWAVへ変換
 4. Whisper.netで日本語文字起こし
 5. 発話の開始・終了時刻とスライド表示時間を照合
-6. 確認・修正后用PDF生成
+6. 確認・修正後にPDF生成
 
 処理はすべてローカルで行われ、動画や音声は外部サービスへ送信されません。モデルダウンロード時のみHugging Faceへアクセスします。
 
@@ -99,7 +125,7 @@ PDFは必要に応じて好きな場所へ保存できます。
 ## テスト
 
 ```powershell
-# スライド検出・画像抽出・PDF生成
+# スライド検出・画像抽出・3種類のPDF生成
 dotnet run --project tests\SmokeTest\SmokeTest.csproj -c Release -- --video "<動画ファイルのパス>"
 
 # 小さなモデルでGPU文字起こしを検証
@@ -109,9 +135,9 @@ dotnet run --project tests\SmokeTest\SmokeTest.csproj -c Release -- --video "<�
 dotnet run --project tests\SmokeTest\SmokeTest.csproj -c Release -- --video "<動画ファイルのパス>" --full-whisper
 ```
 
-`SLIDE_TRANSCRIBER_TEST_VIDEO` 環境変数で動画パスを指定することもできます。
+`SLIDEVIDEODIVIDER_TEST_VIDEO` 環境変数で動画パスを指定することもできます。
 
-## 参考・依存ライブラリ
+## 依存ライブラリ
 
 - [Whisper.net](https://github.com/sandrohanea/whisper.net) — MIT
 - [PDFsharp](https://github.com/empira/PDFsharp) — MIT

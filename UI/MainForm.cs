@@ -1,13 +1,15 @@
 using System.Diagnostics;
 using System.Globalization;
 using System.Runtime.InteropServices;
-using SlideTranscriber.Core;
+using SlideVideoDivider.Core;
 
-namespace SlideTranscriber.UI;
+namespace SlideVideoDivider.UI;
 
 public sealed class MainForm : Form
 {
     private readonly AppSettings _settings = AppSettings.Load();
+    private readonly EditHistory _editHistory = new();
+    private readonly ToolTip _toolTip = new();
     private readonly string? _initialProjectPath;
     private readonly ImageList _slideImageList = new()
     {
@@ -30,7 +32,6 @@ public sealed class MainForm : Form
     private Button _convertTab = null!;
     private Button _notesTab = null!;
     private Button _settingsTab = null!;
-    private Button _themeButton = null!;
     private StatusStrip _statusStrip = null!;
     private ToolStripStatusLabel _statusLabel = null!;
     private ToolStripProgressBar _statusProgress = null!;
@@ -55,6 +56,7 @@ public sealed class MainForm : Form
     private CheckBox _darkModeCheckBox = null!;
     private TextBox _settingsOutputTextBox = null!;
     private TextBox _settingsModelDirectoryTextBox = null!;
+    private NumericUpDown _pdfMinimumFontNumeric = null!;
 
     private TextBox _searchTextBox = null!;
     private ListView _slideListView = null!;
@@ -66,6 +68,8 @@ public sealed class MainForm : Form
     private Label _transcriptCaptionLabel = null!;
     private Button _openProjectButton = null!;
     private Button _saveButton = null!;
+    private Button _undoButton = null!;
+    private Button _redoButton = null!;
     private Button _pdfButton = null!;
     private Button _splitButton = null!;
     private Button _deleteButton = null!;
@@ -76,11 +80,12 @@ public sealed class MainForm : Form
     public MainForm(string? initialProjectPath = null)
     {
         _initialProjectPath = initialProjectPath;
-        Text = "Slide Transcriber";
+        Text = "SlideVideoDivider";
         StartPosition = FormStartPosition.CenterScreen;
         ClientSize = new Size(1180, 760);
         MinimumSize = new Size(980, 660);
         AutoScaleMode = AutoScaleMode.Dpi;
+        KeyPreview = true;
         Font = new Font("Yu Gothic", 9F, FontStyle.Regular, GraphicsUnit.Point);
         Icon = SystemIcons.Application;
 
@@ -89,6 +94,7 @@ public sealed class MainForm : Form
         BuildConvertPage();
         BuildSettingsPage();
         BuildNotesPage();
+        _editHistory.Changed += (_, _) => UpdateHistoryUi();
 
         Controls.Add(_convertPage);
         Controls.Add(_settingsPage);
@@ -137,7 +143,7 @@ public sealed class MainForm : Form
 
         var title = new Label
         {
-            Text = "Slide Transcriber",
+            Text = "SlideVideoDivider",
             AutoSize = true,
             Location = new Point(4, 12),
             Font = new Font("Yu Gothic", 12F, FontStyle.Bold, GraphicsUnit.Point)
@@ -163,23 +169,6 @@ public sealed class MainForm : Form
         navigation.Controls.Add(_notesTab);
         navigation.Controls.Add(_settingsTab);
         _headerPanel.Controls.Add(navigation);
-
-        _themeButton = new Button
-        {
-            Text = "ライト表示",
-            Dock = DockStyle.Right,
-            Width = 92,
-            Height = 32,
-            Margin = new Padding(0)
-        };
-        _themeButton.Click += (_, _) =>
-        {
-            _settings.DarkMode = !_settings.DarkMode;
-            _darkModeCheckBox.Checked = _settings.DarkMode;
-            ApplyTheme();
-        };
-        _headerPanel.Controls.Add(_themeButton);
-        _themeButton.BringToFront();
     }
 
     private static Button CreateNavButton(string text)
@@ -338,8 +327,20 @@ public sealed class MainForm : Form
             UpdateDefaultModelPath();
         };
 
+        AddSectionRow(layout, ref row, "PDF");
+        _pdfMinimumFontNumeric = new NumericUpDown
+        {
+            Minimum = 5.0m,
+            Maximum = 10.0m,
+            Increment = 0.25m,
+            DecimalPlaces = 2,
+            Value = (decimal)_settings.PdfMinimumFontSize
+        };
+        AddFieldRow(layout, ref row, "最小フォントサイズ", _pdfMinimumFontNumeric, null);
+        AddInfoRow(layout, ref row, "単位はptです。小さい値ほど多くの文字を1ページに収められます。");
+
         AddSectionRow(layout, ref row, "このアプリについて");
-        AddInfoRow(layout, ref row, "Slide Transcriber 1.0.0");
+        AddInfoRow(layout, ref row, "SlideVideoDivider 1.1.0");
         AddInfoRow(layout, ref row, "処理はすべてローカルで実行されます。音声や動画は外部サービスへ送信されません。");
     }
 
@@ -347,16 +348,16 @@ public sealed class MainForm : Form
     {
         _notesPage = new Panel { Dock = DockStyle.Fill, Padding = new Padding(8) };
 
-        var toolbar = new Panel { Dock = DockStyle.Top, Height = 44, Padding = new Padding(0, 6, 0, 6) };
+        var toolbar = new Panel { Dock = DockStyle.Top, Height = 82, Padding = new Padding(0, 6, 0, 6) };
         var toolbarLayout = new FlowLayoutPanel
         {
             Dock = DockStyle.Fill,
-            WrapContents = false,
+            WrapContents = true,
             AutoSize = false,
             Margin = new Padding(0),
             Padding = new Padding(0)
         };
-        _searchTextBox = new TextBox { Width = 190, PlaceholderText = "スライドを検索" };
+        _searchTextBox = new TextBox { Width = 150, PlaceholderText = "スライドを検索" };
         _searchTextBox.TextChanged += (_, _) => RefreshSlideList();
         toolbarLayout.Controls.Add(_searchTextBox);
         toolbarLayout.Controls.Add(CreateToolbarSeparator());
@@ -364,6 +365,10 @@ public sealed class MainForm : Form
         _openProjectButton.Click += (_, _) => OpenProject();
         _saveButton = CreateToolbarButton("保存");
         _saveButton.Click += (_, _) => SaveProject();
+        _undoButton = CreateToolbarButton("元に戻す");
+        _undoButton.Click += (_, _) => UndoEdit();
+        _redoButton = CreateToolbarButton("やり直し");
+        _redoButton.Click += (_, _) => RedoEdit();
         _pdfButton = CreateToolbarButton("PDF出力");
         Theme.StylePrimary(_pdfButton, _settings.DarkMode);
         _pdfButton.Click += async (_, _) => await ExportPdfAsync();
@@ -380,8 +385,8 @@ public sealed class MainForm : Form
         _replaceImageButton.Click += (_, _) => ReplaceSelectedImage();
         toolbarLayout.Controls.AddRange(new Control[]
         {
-            _openProjectButton, _saveButton, _pdfButton, CreateToolbarSeparator(), _splitButton, _deleteButton,
-            CreateToolbarSeparator(), _movePreviousButton, _moveNextButton, _replaceImageButton
+            _openProjectButton, _saveButton, _undoButton, _redoButton, _pdfButton, CreateToolbarSeparator(),
+            _splitButton, _deleteButton, CreateToolbarSeparator(), _movePreviousButton, _moveNextButton, _replaceImageButton
         });
         toolbar.Controls.Add(toolbarLayout);
 
@@ -512,7 +517,7 @@ public sealed class MainForm : Form
             AutoSize = true,
             Height = 30,
             Margin = new Padding(0, 0, 5, 0),
-            Padding = new Padding(9, 3, 9, 3),
+            Padding = new Padding(6, 3, 6, 3),
             UseVisualStyleBackColor = false
         };
     }
@@ -637,7 +642,6 @@ public sealed class MainForm : Form
         Theme.StylePrimary(_startButton, _settings.DarkMode);
         Theme.StylePrimary(_pdfButton, _settings.DarkMode);
         Theme.StyleDanger(_deleteButton, _settings.DarkMode);
-        _themeButton.Text = _settings.DarkMode ? "ライト表示" : "ダーク表示";
         UpdateTitleBarTheme();
         _slideListView.BackColor = Theme.Current(_settings.DarkMode).Input;
         _slideListView.ForeColor = Theme.Current(_settings.DarkMode).Text;
@@ -648,8 +652,8 @@ public sealed class MainForm : Form
     private void UpdateWindowTitle()
     {
         Text = _project is null
-            ? "Slide Transcriber"
-            : $"Slide Transcriber — {Path.GetFileNameWithoutExtension(_project.VideoName)}{(_dirty ? " *" : string.Empty)}";
+            ? "SlideVideoDivider"
+            : $"SlideVideoDivider — {Path.GetFileNameWithoutExtension(_project.VideoName)}{(_dirty ? " *" : string.Empty)}";
     }
 
     private void UpdateToolStatus()
@@ -887,6 +891,7 @@ public sealed class MainForm : Form
     {
         CommitSelectedTranscript();
         _project = project;
+        _editHistory.Clear();
         _dirty = false;
         _selectedSlideIndex = -1;
         RefreshSlideList();
@@ -1091,12 +1096,90 @@ public sealed class MainForm : Form
         var hasSelection = _project is not null && _selectedSlideIndex >= 0;
         _openProjectButton.Enabled = !_busy;
         _saveButton.Enabled = _project is not null && !_busy;
+        _undoButton.Enabled = _project is not null && _editHistory.CanUndo && !_busy;
+        _redoButton.Enabled = _project is not null && _editHistory.CanRedo && !_busy;
         _pdfButton.Enabled = hasSelection && !_busy;
         _splitButton.Enabled = hasSelection && !_busy;
         _deleteButton.Enabled = hasSelection && (_project?.Slides.Count ?? 0) > 1 && !_busy;
         _movePreviousButton.Enabled = hasSelection && _selectedSlideIndex > 0 && !_busy;
         _moveNextButton.Enabled = hasSelection && _project is not null && _selectedSlideIndex < _project.Slides.Count - 1 && !_busy;
         _replaceImageButton.Enabled = hasSelection && !_busy;
+    }
+
+    private void UpdateHistoryUi()
+    {
+        if (_undoButton is null || _redoButton is null)
+        {
+            return;
+        }
+        _undoButton.Enabled = _project is not null && _editHistory.CanUndo && !_busy;
+        _redoButton.Enabled = _project is not null && _editHistory.CanRedo && !_busy;
+        _toolTip.SetToolTip(_undoButton, _editHistory.UndoDescription is null ? "元に戻せる操作がありません" : $"元に戻す: {_editHistory.UndoDescription}");
+        _toolTip.SetToolTip(_redoButton, _editHistory.RedoDescription is null ? "やり直せる操作がありません" : $"やり直し: {_editHistory.RedoDescription}");
+    }
+
+    private void UndoEdit()
+    {
+        if (_busy || _project is null || !_editHistory.CanUndo)
+        {
+            return;
+        }
+        CommitSelectedTranscript();
+        _editHistory.Undo();
+        RefreshAfterHistoryEdit();
+    }
+
+    private void RedoEdit()
+    {
+        if (_busy || _project is null || !_editHistory.CanRedo)
+        {
+            return;
+        }
+        CommitSelectedTranscript();
+        _editHistory.Redo();
+        RefreshAfterHistoryEdit();
+    }
+
+    private void RefreshAfterHistoryEdit()
+    {
+        _dirty = true;
+        if (_project is not null && _selectedSlideIndex >= 0 && _selectedSlideIndex < _project.Slides.Count)
+        {
+            _loadingSlide = true;
+            _transcriptTextBox.Text = _project.Slides[_selectedSlideIndex].Transcript;
+            _loadingSlide = false;
+        }
+        RefreshSlideList();
+        if (_project is not null && _selectedSlideIndex >= 0 && _selectedSlideIndex < _project.Slides.Count)
+        {
+            var item = _slideListView.Items.Cast<ListViewItem>()
+                .FirstOrDefault(x => (int)x.Tag! == _selectedSlideIndex);
+            if (item is not null)
+            {
+                item.Selected = true;
+                LoadSelectedSlide();
+            }
+        }
+        UpdateWindowTitle();
+        UpdateHistoryUi();
+        _statusLabel.Text = _editHistory.UndoDescription is null
+            ? "操作を元に戻しました。"
+            : $"元に戻しました。次の操作: {_editHistory.UndoDescription}";
+    }
+
+    protected override bool ProcessCmdKey(ref Message msg, Keys keyData)
+    {
+        if (keyData == (Keys.Control | Keys.Z))
+        {
+            UndoEdit();
+            return true;
+        }
+        if (keyData == (Keys.Control | Keys.Y) || keyData == (Keys.Control | Keys.Shift | Keys.Z))
+        {
+            RedoEdit();
+            return true;
+        }
+        return base.ProcessCmdKey(ref msg, keyData);
     }
 
     private async Task SplitSelectedSlideAsync()
@@ -1212,19 +1295,38 @@ public sealed class MainForm : Form
 
         var source = _project.Slides[_selectedSlideIndex];
         var target = _project.Slides[targetIndex];
-        if (string.IsNullOrWhiteSpace(source.Transcript))
+        var sourceText = TranscriptAligner.NormalizeTranscript(source.Transcript);
+        var targetText = TranscriptAligner.NormalizeTranscript(target.Transcript);
+        if (string.IsNullOrWhiteSpace(sourceText))
         {
             return;
         }
 
-        target.Transcript = string.IsNullOrWhiteSpace(target.Transcript)
-            ? source.Transcript
-            : target.Transcript + Environment.NewLine + Environment.NewLine + source.Transcript;
-        source.Transcript = string.Empty;
+        void ApplyMove()
+        {
+            target.Transcript = string.IsNullOrWhiteSpace(targetText)
+                ? sourceText
+                : targetText + Environment.NewLine + sourceText;
+            source.Transcript = string.Empty;
+        }
+
+        ApplyMove();
+        _editHistory.Push(new EditAction
+        {
+            Description = direction < 0 ? "文字を前へ" : "文字を次へ",
+            Undo = () =>
+            {
+                source.Transcript = sourceText;
+                target.Transcript = targetText;
+            },
+            Redo = ApplyMove
+        });
         _transcriptTextBox.Text = string.Empty;
         _dirty = true;
         RefreshSlideList();
         UpdateWindowTitle();
+        UpdateHistoryUi();
+        _statusLabel.Text = direction < 0 ? "文字起こしを前のスライドへ移動しました。" : "文字起こしを次のスライドへ移動しました。";
     }
 
     private void ReplaceSelectedImage()
@@ -1244,13 +1346,31 @@ public sealed class MainForm : Form
             return;
         }
 
+        ReplaceImageFile(dialog.FileName);
+    }
+
+    private void ReplaceImageFile(string sourcePath)
+    {
+        if (_project is null || _selectedSlideIndex < 0)
+        {
+            return;
+        }
+
         try
         {
-            var extension = Path.GetExtension(dialog.FileName).ToLowerInvariant();
+            var extension = Path.GetExtension(sourcePath).ToLowerInvariant();
             var destination = Path.Combine(_project.ProjectDirectory, "slides", $"slide_replace_{Guid.NewGuid():N}{extension}");
             Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
-            File.Copy(dialog.FileName, destination);
-            _project.Slides[_selectedSlideIndex].ImagePath = destination;
+            File.Copy(sourcePath, destination);
+            var slide = _project.Slides[_selectedSlideIndex];
+            var previousImagePath = slide.ImagePath;
+            slide.ImagePath = destination;
+            _editHistory.Push(new EditAction
+            {
+                Description = "画像差し替え",
+                Undo = () => slide.ImagePath = previousImagePath,
+                Redo = () => slide.ImagePath = destination
+            });
             _dirty = true;
             RefreshSlideList();
             var item = _slideListView.Items.Cast<ListViewItem>().FirstOrDefault(x => (int)x.Tag! == _selectedSlideIndex);
@@ -1260,6 +1380,8 @@ public sealed class MainForm : Form
                 LoadSelectedSlide();
             }
             UpdateWindowTitle();
+            UpdateHistoryUi();
+            _statusLabel.Text = "スライド画像を差し替えました。";
         }
         catch (Exception ex)
         {
@@ -1349,21 +1471,42 @@ public sealed class MainForm : Form
 
     private async Task ExportPdfAsync()
     {
-        if (_project is null || _selectedSlideIndex < 0 || _busy)
+        if (_project is null || _busy)
         {
             return;
         }
 
         CommitSelectedTranscript();
+        _ = Enum.TryParse<PdfExportMode>(_settings.PdfExportMode, out var currentMode);
+        using var optionsDialog = new PdfExportDialog(currentMode, _settings.PdfMinimumFontSize, _settings.DarkMode);
+        if (optionsDialog.ShowDialog(this) != DialogResult.OK)
+        {
+            return;
+        }
+
+        var options = optionsDialog.Options;
+        var suffix = options.Mode switch
+        {
+            PdfExportMode.SlidesOnly => "_スライド",
+            PdfExportMode.TranscriptsOnly => "_文字起こし",
+            _ => "_スライドノート"
+        };
         using var dialog = new SaveFileDialog
         {
             Filter = "PDFファイル|*.pdf|すべてのファイル|*.*",
-            FileName = Path.GetFileNameWithoutExtension(_project.VideoName) + "_スライドノート.pdf",
-            Title = "スライドノートPDFを保存"
+            FileName = Path.GetFileNameWithoutExtension(_project.VideoName) + suffix + ".pdf",
+            Title = "PDFを保存"
         };
         if (dialog.ShowDialog(this) != DialogResult.OK)
         {
             return;
+        }
+
+        _settings.PdfExportMode = options.Mode.ToString();
+        _settings.PdfMinimumFontSize = options.MinimumFontSize;
+        if (_pdfMinimumFontNumeric.Value != (decimal)options.MinimumFontSize)
+        {
+            _pdfMinimumFontNumeric.Value = (decimal)options.MinimumFontSize;
         }
 
         SetBusy(true);
@@ -1372,7 +1515,7 @@ public sealed class MainForm : Form
         var progress = new Progress<double>(value => _statusProgress.Value = (int)Math.Clamp(value, 0, 100));
         try
         {
-            await PdfExporter.ExportAsync(_project, dialog.FileName, status, progress);
+            await PdfExporter.ExportAsync(_project, dialog.FileName, options, status, progress);
             _statusLabel.Text = $"PDFを書き出しました: {dialog.FileName}";
             var result = MessageBox.Show(this, "PDFを書き出しました。開きますか？", "完了", MessageBoxButtons.YesNo,
                 MessageBoxIcon.Information);
@@ -1384,7 +1527,7 @@ public sealed class MainForm : Form
         catch (PdfLayoutException ex)
         {
             var numbers = string.Join("、", ex.SlideNumbers.Select(x => x.ToString("D2")));
-            MessageBox.Show(this, $"スライド {numbers} の文字起こしが長すぎます。\n文字を編集するか、フォント最小サイズを調整してください。",
+            MessageBox.Show(this, $"スライド {numbers} の文字起こしが長すぎます。\n現在の最小フォントサイズは {ex.MinimumFontSize:0.00}pt です。\nPDF出力オプションで変更してください。",
                 "PDFレイアウト警告", MessageBoxButtons.OK, MessageBoxIcon.Warning);
             _statusLabel.Text = "文字量オーバーのためPDF出力を中止しました。";
         }
@@ -1477,6 +1620,7 @@ public sealed class MainForm : Form
         _settings.MinimumSlideSeconds = (double)_minimumSlideNumeric.Value;
         _settings.InitialPrompt = _promptTextBox.Text;
         _settings.ModelIndex = _modelComboBox.SelectedIndex;
+        _settings.PdfMinimumFontSize = (double)_pdfMinimumFontNumeric.Value;
         _settings.Save();
     }
 

@@ -4,4 +4,4 @@ param(
 
 $ErrorActionPreference = "Stop"
 Set-Location $PSScriptRoot
-dotnet run --project SlideTranscriber.csproj -c $Configuration
+dotnet run --project SlideVideoDivider.csproj -c $Configuration
