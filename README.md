@@ -1,144 +1,122 @@
 # SlideVideoDivider
 
-音声付きのスライド動画を、スライド画像と文字起こしのPDFへ変換するWindowsアプリです。
+音声付きスライド動画を、スライド画像と文字起こしのPDFへ変換するWindowsアプリのRust版です。
 
-Pythonは使用しません。.NET WinForms、Whisper.net（whisper.cppベース）、FFmpeg、PDFsharpで構成されています。
+Pythonは使用しません。
+
+## 技術構成
+
+- UI：eframe / egui
+- 音声認識：whisper-rs（whisper.cpp）
+- 動画・音声処理：FFmpeg / FFprobe
+- PDF：printpdf
+- 画像・文字描画：image / imageproc / ab_glyph
+- 設定・プロジェクト：serde / JSON
 
 ## 画面
 
-- ダーク／ライトテーマ（設定タブで切り替え）
-- 上部タブ、下部ステータスバー
-- スライド一覧・プレビュー・文字起こし編集の3ペイン
-- スライドの中点分割、削除、画像差し替え、文字の前後移動
-- 操作履歴のUndo／Redo
-- プロジェクトの保存・再開
+- 上部タブ：変換 / スライドノート / 設定
+- 下部ステータスバー
+- 左：スライド一覧
+- 中央：スライドプレビュー
+- 右：文字起こし編集
+- ダーク／ライトテーマ
+- Undo / Redo（`Ctrl+Z` / `Ctrl+Y` / `Ctrl+Shift+Z`）
 
-## 操作履歴
+## ビルド要件
 
-以下の操作を「元に戻す」「やり直し」できます。
-
-- 文字を前へ
-- 文字を次へ
-- 画像差し替え
-
-ショートカット：
-
-- `Ctrl+Z`：元に戻す
-- `Ctrl+Y`：やり直し
-- `Ctrl+Shift+Z`：やり直し
-
-## 動作要件
-
-- Windows 10 / 11 x64
-- .NET 10 Desktop Runtime
+- Rust 1.95以降
+- Visual Studio Build Tools（MSVC）
+- LLVM / libclang
+- CMake
 - FFmpeg / FFprobe（PATHに追加）
-- NVIDIA GPU + CUDA 13 Toolkit（GPU使用時。未検出時はCPUへフォールバック）
+- CUDA Toolkit 12.4以降（GPU版）
 - Microsoft Visual C++ Redistributable 2022 x64
 
-GPUがなくてもCPUで動作しますが、処理時間は長くなります。
-
-## ビルド・起動
+whisper-rsはビルド時にlibclangを使用します。LLVMを導入し、必要に応じて `LIBCLANG_PATH` を設定してください。
 
 ```powershell
-git clone https://github.com/Runa-chama/SlideVideo_Divider.git
-cd SlideVideo_Divider
-dotnet build SlideVideoDivider.slnx -c Release
-dotnet run --project SlideVideoDivider.csproj -c Release
+winget install --id LLVM.LLVM --exact
+$env:LIBCLANG_PATH = 'C:\Program Files\LLVM\bin'
 ```
 
-単体exeとして配布する場合：
+Visual Studio 2026とCUDA 12.9の組み合わせはNVCCに未対応です。CUDA 13.4以降を推奨します。同梱の `run-rust.ps1` はCUDA 13.4を優先的に選択します。
+
+## GPU版ビルド
 
 ```powershell
-.\publish.ps1
+$env:CMAKE_CUDA_ARCHITECTURES = "86;89"
+cargo build --release --features cuda
 ```
 
-出力先は `publish\SlideVideoDivider.exe` です。音声認識モデルはexeに含めず、初回利用時にダウンロードします。
-
-## 使い方
-
-1. 「変換」タブで音声付き動画を選択、またはドラッグ＆ドロップ
-2. 出力フォルダを確認
-3. 認識モデルを選択
-   - 既定は `large-v3-turbo / Q8`
-   - 初回は「ダウンロード」をクリック
-4. 必要に応じてスライド検出しきい値・専門用語ヒントを調整
-5. 「変換開始」
-6. 完了後、「スライドノート」タブで内容を確認・修正
-7. 「PDF出力」で出力モードを選択
-
-## 出力
+出力：
 
 ```text
-出力フォルダ/
-  動画名/
-    slides/
-      slide_001.jpg
-      slide_002.jpg
-      ...
-    動画名_project.json
+target\release\SlideVideoDivider.exe
 ```
 
-PDFは必要に応じて好きな場所へ保存できます。
+GPU初期化に失敗した場合はCPUへフォールバックします。
 
-`*_project.json` は「開く」ボタン、またはexeへドラッグ＆ドロップして再開できます。画像はプロジェクトフォルダからの相対パスで保存されます。
+## CPU版ビルド
 
-## PDF出力オプション
+```powershell
+cargo build --release --no-default-features
+```
 
-PDF出力前にダイヤログが表示されます。
+## 起動
 
-- **スライド＋文字起こし（既定）**
-  - 上半分にスライド、下半分に文字起こし
-- **スライドのみ**
-  - スライド画像だけのPDF
-- **文字起こしのみ**
-  - 文字起こしだけのPDF
+```powershell
+cargo run --release --features cuda
+```
 
-すべてA4縦で、1スライド＝1ページです。
+または、CUDA 13.4を優先的に選択する同梱スクリプト：
 
-最小フォントサイズは「設定」タブ、またはPDF出力ダイヤログで変更できます。既定値は `6.5pt` です。収まらない場合は該当スライドと現在の最小サイズを警告します。
+```powershell
+.\run-rust.ps1
+```
 
-軽量化と日本語フォントの安定表示のため、PDF内の文字起こしは画像としてレンダリングされます。検索・コピーはできません。元の文字はプロジェクトJSONと編集画面に残ります。
+または：
 
-## 文字起こしの整形
+```text
+target\release\SlideVideoDivider.exe
+```
 
-- 発話の間に空行を挿入しません
-- 既存プロジェクト読み込み時も空行を自動除去します
+初回利用時に音声認識モデルをダウンロードします。既定は `large-v3-turbo / Q8` です。
 
-## 処理の流れ
+## PDF出力
 
-1. FFmpegでスライド切替を検出
-2. 各スライドの安定した代表フレームをJPEG抽出
-3. FFmpegで音声を16kHzモノラルWAVへ変換
-4. Whisper.netで日本語文字起こし
-5. 発話の開始・終了時刻とスライド表示時間を照合
-6. 確認・修正後にPDF生成
+PDF出力時に次のモードを選択できます。
 
-処理はすべてローカルで行われ、動画や音声は外部サービスへ送信されません。モデルダウンロード時のみHugging Faceへアクセスします。
+- スライド＋文字起こし（既定）
+- スライドのみ
+- 文字起こしのみ
 
-## 注意点
+すべてA4縦で、1スライド＝1ページです。最小フォントサイズは設定タブまたはPDF出力ダイアログで変更できます。
 
-- 自動スライド検出は完璧ではありません。アニメーションやフェードでは「中点で分割」「削除」で調整してください。
-- 音声とスライドの切替がずれる場合は、開始・終了秒を直接編集できます。
-- 専門用語は「専門用語ヒント」に入れると精度が改善する場合があります。
-- GPU／CPUの切り替えはアプリ再起動後に確実に反映されます。
+軽量化のためPDF内の文字起こしは画像として描画されます。
+
+## プロジェクト互換性
+
+以前の `.NET版` が保存した `*_project.json` を読み込めます。
+
+- 画像はプロジェクトフォルダからの相対パスで保存
+- 空行は自動除去
+- 既存の音声認識モデル保存先を設定から再利用可能
 
 ## テスト
 
 ```powershell
-# スライド検出・画像抽出・3種類のPDF生成
-dotnet run --project tests\SmokeTest\SmokeTest.csproj -c Release -- --video "<動画ファイルのパス>"
+cargo fmt --all -- --check
+cargo clippy --all-targets --no-default-features -- -D warnings
+cargo test --no-default-features
 
-# 小さなモデルでGPU文字起こしを検証
-dotnet run --project tests\SmokeTest\SmokeTest.csproj -c Release -- --video "<動画ファイルのパス>" --whisper
-
-# 実際の動画全体で文字起こし・対応付けを検証
-dotnet run --project tests\SmokeTest\SmokeTest.csproj -c Release -- --video "<動画ファイルのパス>" --full-whisper
+# 実動画のエンドツーエンド確認
+cargo run --release --no-default-features --bin smoke -- --video "<動画ファイルのパス>" --model "<whisper-model.bin>" --model-index 4 --cpu --pdf
 ```
 
-`SLIDEVIDEODIVIDER_TEST_VIDEO` 環境変数で動画パスを指定することもできます。
+## ライセンス
 
-## 依存ライブラリ
-
-- [Whisper.net](https://github.com/sandrohanea/whisper.net) — MIT
-- [PDFsharp](https://github.com/empira/PDFsharp) — MIT
-- FFmpeg — 外部実行ファイルとして使用
+- 同梱フォント：M PLUS 1（SIL Open Font License 1.1）
+- whisper-rs：Unlicense
+- eframe / egui：MIT / Apache-2.0
+- printpdf：MIT

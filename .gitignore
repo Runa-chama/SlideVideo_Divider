@@ -1,5 +1,7 @@
 bin/
 obj/
+target/
+smoke-output/
 publish/
 output/
 models/
@@ -7,3 +9,8 @@ models/
 *.user
 *.suo
 TestResults/
+
+
+# Added by cargo
+
+/target

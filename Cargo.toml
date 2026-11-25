@@ -1,0 +1,39 @@
+[package]
+name = "slide_video_divider"
+version = "0.1.0"
+edition = "2024"
+
+[features]
+default = ["cuda"]
+cuda = ["whisper-rs/cuda"]
+
+[[bin]]
+name = "SlideVideoDivider"
+path = "src/main.rs"
+
+[dependencies]
+ab_glyph = "0.2.32"
+anyhow = "1.0.105"
+chrono = "0.4"
+dirs = "7.0.0"
+eframe = { version = "0.37.0", default-features = false, features = ["glow", "default_fonts"] }
+egui = "0.37.0"
+glow = "0.17"
+hound = "3.5"
+image = { version = "0.25", default-features = false, features = ["jpeg", "png", "bmp"] }
+imageproc = "0.25"
+open = "5.4.5"
+printpdf = { version = "0.12.14", default-features = false, features = ["images", "jpeg", "png"] }
+raw-window-handle = "0.6"
+regex = "1.13.2"
+reqwest = { version = "0.13.5", default-features = false, features = ["blocking", "rustls"] }
+rfd = "0.18.0"
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.154"
+tracing = "0.1.44"
+tracing-subscriber = "0.3.23"
+whisper-rs = { version = "0.16.0", default-features = false }
+windows = { version = "0.62", features = ["Win32_Graphics_Dwm"] }
+
+[dev-dependencies]
+tempfile = "3"
