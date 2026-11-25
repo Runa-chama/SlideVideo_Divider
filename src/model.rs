@@ -3,10 +3,29 @@ use std::path::PathBuf;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default, rename_all = "PascalCase")]
+pub struct TranscriptToken {
+    pub start: f64,
+    pub end: f64,
+    pub text: String,
+}
+
+impl Default for TranscriptToken {
+    fn default() -> Self {
+        Self {
+            start: 0.0,
+            end: 0.0,
+            text: String::new(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default, rename_all = "PascalCase")]
 pub struct TranscriptSegment {
     pub start: f64,
     pub end: f64,
     pub text: String,
+    pub tokens: Vec<TranscriptToken>,
 }
 
 impl Default for TranscriptSegment {
@@ -15,6 +34,7 @@ impl Default for TranscriptSegment {
             start: 0.0,
             end: 0.0,
             text: String::new(),
+            tokens: Vec::new(),
         }
     }
 }

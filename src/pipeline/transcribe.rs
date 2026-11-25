@@ -119,6 +119,7 @@ pub fn transcribe(
     );
     params.set_language(Some("ja"));
     params.set_no_context(true);
+    params.set_token_timestamps(true);
     params.set_print_progress(false);
     params.set_print_realtime(false);
     if !initial_prompt.trim().is_empty() {
@@ -149,10 +150,33 @@ pub fn transcribe(
         if text.is_empty() {
             continue;
         }
+        let mut tokens = Vec::new();
+        for token_index in 0..segment.n_tokens() {
+            let Some(token) = segment.get_token(token_index) else {
+                continue;
+            };
+            let token_text = token.to_str_lossy().unwrap_or_default();
+            if token_text.is_empty()
+                || (token_text.starts_with("<|") && token_text.ends_with("|>"))
+                || (token_text.starts_with("[_") && token_text.ends_with("_]"))
+            {
+                continue;
+            }
+            let data = token.token_data();
+            if data.t0 >= 0 && data.t1 > data.t0 {
+                tokens.push(crate::model::TranscriptToken {
+                    start: data.t0 as f64 / 10.0,
+                    end: data.t1 as f64 / 10.0,
+                    text: token_text.to_string(),
+                });
+            }
+        }
+
         segments.push(TranscriptSegment {
             start: segment.start_timestamp() as f64 / 10.0,
             end: segment.end_timestamp() as f64 / 10.0,
             text,
+            tokens,
         });
     }
     if segments.is_empty() {

@@ -536,6 +536,19 @@ impl SlideVideoDividerApp {
                         minimum_font_size: self.settings.pdf_minimum_font_size,
                     });
                 }
+                if ui
+                    .add_enabled(
+                        !self.busy
+                            && self
+                                .project
+                                .as_ref()
+                                .is_some_and(|project| !project.segments.is_empty()),
+                        Button::new("再関連付け"),
+                    )
+                    .clicked()
+                {
+                    self.realign_project();
+                }
                 ui.separator();
                 if ui
                     .add_enabled(
@@ -1055,6 +1068,24 @@ impl SlideVideoDividerApp {
         {
             slide.transcript = self.transcript_buffer.clone();
         }
+    }
+
+    fn realign_project(&mut self) {
+        self.commit_transcript();
+        let Some(project) = self.project.as_mut() else {
+            return;
+        };
+        let old_texts = project
+            .slides
+            .iter()
+            .map(|slide| slide.transcript.clone())
+            .collect();
+        let command = EditCommand::ReassignTranscripts { old_texts };
+        command.apply(project);
+        self.history.push(command);
+        self.dirty = true;
+        self.reload_selected();
+        self.status = "文字起こしをスライドへ再関連付けしました".to_string();
     }
 
     fn move_transcript(&mut self, direction: i32) {
