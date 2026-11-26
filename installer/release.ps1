@@ -47,9 +47,19 @@ $body = @{
     prerelease = $false
 } | ConvertTo-Json
 
-$release = Invoke-RestMethod -Method Post -Uri "https://api.github.com/repos/Runa-chama/SlideVideo_Divider/releases" -Headers $headers -Body $body -ContentType "application/json"
+$existing = $null
+try {
+    $existing = Invoke-RestMethod -Method Get -Uri "https://api.github.com/repos/Runa-chama/SlideVideo_Divider/releases/tags/$tag" -Headers $headers
+} catch {
+    # タグに対応するリリースが存在しない場合は新規作成する。
+}
+$release = if ($existing) {
+    $existing
+} else {
+    Invoke-RestMethod -Method Post -Uri "https://api.github.com/repos/Runa-chama/SlideVideo_Divider/releases" -Headers $headers -Body $body -ContentType "application/json"
+}
 $uploadUrl = ($release.upload_url -replace "\{.*\}$", "")
 $assetName = [uri]::EscapeDataString((Split-Path $asset -Leaf))
-Invoke-RestMethod -Method Post -Uri "$uploadUrl?name=$assetName" -Headers $headers -ContentType "application/octet-stream" -InFile $asset | Out-Null
+Invoke-RestMethod -Method Post -Uri "${uploadUrl}?name=$assetName" -Headers $headers -ContentType "application/octet-stream" -InFile $asset | Out-Null
 
 Write-Host "リリース完了: $($release.html_url)"
