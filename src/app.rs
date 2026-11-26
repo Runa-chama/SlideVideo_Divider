@@ -41,7 +41,7 @@ struct MessageState {
 enum UpdateEvent {
     Checked(Result<Option<update::ReleaseInfo>, String>),
     Progress(f32),
-    Downloaded(Result<PathBuf, String>),
+    DownloadFailed(String),
 }
 
 pub struct SlideVideoDividerApp {
@@ -1515,14 +1515,27 @@ impl SlideVideoDividerApp {
         std::thread::spawn(move || {
             let cancel = Arc::new(AtomicBool::new(false));
             let progress_sender = sender.clone();
-            let result = update::download_installer(&release, &cancel, &mut |written, total| {
+            match update::download_installer(&release, &cancel, &mut |written, total| {
                 if let Some(total) = total.filter(|total| *total > 0) {
                     let percent = (written as f64 / total as f64 * 100.0) as f32;
                     let _ = progress_sender.send(UpdateEvent::Progress(percent));
                 }
-            })
-            .map_err(|error| error.to_string());
-            let _ = sender.send(UpdateEvent::Downloaded(result));
+            }) {
+                Ok(path) => match update::launch_installer(&path) {
+                    Ok(()) => {
+                        // ワーカースレッドからプロセス全体を終了し、
+                        // インストーラがファイルを置き換えられるようにする。
+                        std::process::exit(0);
+                    }
+                    Err(error) => {
+                        let _ =
+                            progress_sender.send(UpdateEvent::DownloadFailed(error.to_string()));
+                    }
+                },
+                Err(error) => {
+                    let _ = progress_sender.send(UpdateEvent::DownloadFailed(error.to_string()));
+                }
+            }
         });
     }
 
@@ -1559,23 +1572,7 @@ impl SlideVideoDividerApp {
                     self.update_progress = Some(percent);
                     self.status = format!("更新をダウンロードしています... {percent:.0}%");
                 }
-                UpdateEvent::Downloaded(Ok(path)) => {
-                    self.update_progress = None;
-                    match update::launch_installer(&path) {
-                        Ok(()) => {
-                            self.status = "更新を適用します...".to_string();
-                            // ファイルのロックを解放してからサイレントインストーラを実行する。
-                            std::process::exit(0);
-                        }
-                        Err(error) => {
-                            self.message = Some(MessageState {
-                                title: "更新エラー".to_string(),
-                                text: error.to_string(),
-                            });
-                        }
-                    }
-                }
-                UpdateEvent::Downloaded(Err(message)) => {
+                UpdateEvent::DownloadFailed(message) => {
                     self.update_progress = None;
                     self.status = "更新のダウンロードに失敗しました".to_string();
                     self.message = Some(MessageState {
