@@ -78,10 +78,15 @@ pub struct SlideVideoDividerApp {
     update_receiver: Option<Receiver<UpdateEvent>>,
     update_progress: Option<f32>,
     update_checked: bool,
+    auto_update: bool,
 }
 
 impl SlideVideoDividerApp {
-    pub fn new(cc: &CreationContext<'_>, initial_project: Option<PathBuf>) -> Self {
+    pub fn new(
+        cc: &CreationContext<'_>,
+        initial_project: Option<PathBuf>,
+        auto_update: bool,
+    ) -> Self {
         install_fonts(&cc.egui_ctx);
         let mut settings = AppSettings::load();
         settings.pdf_minimum_font_size = settings.pdf_minimum_font_size.clamp(5.0, 10.0);
@@ -146,6 +151,7 @@ impl SlideVideoDividerApp {
             update_receiver: None,
             update_progress: None,
             update_checked: false,
+            auto_update,
             settings,
         }
     }
@@ -207,7 +213,7 @@ impl SlideVideoDividerApp {
         self.drain_update_events(&ctx);
         if !self.update_checked {
             self.update_checked = true;
-            if self.settings.check_updates {
+            if self.settings.check_updates || self.auto_update {
                 self.start_update_check();
             }
         }
@@ -1534,6 +1540,9 @@ impl SlideVideoDividerApp {
                             format!("新しいバージョン {} が利用可能です", release.version);
                     }
                     self.update_available = Some(release);
+                    if self.auto_update {
+                        self.start_update_download();
+                    }
                 }
                 UpdateEvent::Checked(Ok(None)) => {
                     self.update_available = None;

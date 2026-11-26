@@ -7,7 +7,9 @@ fn main() -> eframe::Result<()> {
     tracing_subscriber::fmt()
         .with_max_level(tracing::Level::WARN)
         .init();
-    let initial_project = std::env::args_os().skip(1).map(PathBuf::from).find(|path| {
+    let arguments: Vec<_> = std::env::args_os().skip(1).collect();
+    let auto_update = arguments.iter().any(|argument| argument == "--update");
+    let initial_project = arguments.into_iter().map(PathBuf::from).find(|path| {
         path.extension()
             .and_then(|extension| extension.to_str())
             .is_some_and(|extension| extension.eq_ignore_ascii_case("json"))
@@ -29,6 +31,7 @@ fn main() -> eframe::Result<()> {
             Ok(Box::new(app::SlideVideoDividerApp::new(
                 creation_context,
                 initial_project,
+                auto_update,
             )))
         }),
     )
