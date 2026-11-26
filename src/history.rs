@@ -14,9 +14,6 @@ pub enum EditCommand {
         old_path: PathBuf,
         new_path: PathBuf,
     },
-    ReassignTranscripts {
-        old_texts: Vec<String>,
-    },
 }
 
 impl EditCommand {
@@ -24,7 +21,6 @@ impl EditCommand {
         match self {
             Self::MoveTranscript { .. } => "文字の移動",
             Self::ReplaceImage { .. } => "画像差し替え",
-            Self::ReassignTranscripts { .. } => "再関連付け",
         }
     }
 
@@ -47,7 +43,6 @@ impl EditCommand {
             Self::ReplaceImage {
                 index, new_path, ..
             } => project.slides[*index].image_path = new_path.clone(),
-            Self::ReassignTranscripts { .. } => crate::project::assign_transcripts(project),
         }
     }
 
@@ -65,11 +60,6 @@ impl EditCommand {
             Self::ReplaceImage {
                 index, old_path, ..
             } => project.slides[*index].image_path = old_path.clone(),
-            Self::ReassignTranscripts { old_texts } => {
-                for (slide, old_text) in project.slides.iter_mut().zip(old_texts) {
-                    slide.transcript = old_text.clone();
-                }
-            }
         }
     }
 }
@@ -183,47 +173,6 @@ mod tests {
             project.slides[0].image_path,
             std::path::PathBuf::from("new.jpg")
         );
-    }
-
-    #[test]
-    fn undo_and_redo_reassign_transcripts() {
-        let mut project = Project {
-            slides: vec![
-                Slide {
-                    start: 0.0,
-                    end: 5.0,
-                    transcript: "old1".to_string(),
-                    ..Default::default()
-                },
-                Slide {
-                    start: 5.0,
-                    end: 10.0,
-                    transcript: "old2".to_string(),
-                    ..Default::default()
-                },
-            ],
-            segments: vec![crate::model::TranscriptSegment {
-                start: 0.0,
-                end: 10.0,
-                text: "0123456789".to_string(),
-                ..Default::default()
-            }],
-            ..Default::default()
-        };
-        let mut history = EditHistory::new();
-        let command = EditCommand::ReassignTranscripts {
-            old_texts: vec!["old1".to_string(), "old2".to_string()],
-        };
-        command.apply(&mut project);
-        history.push(command);
-        assert_eq!(project.slides[0].transcript, "01234");
-        assert_eq!(project.slides[1].transcript, "56789");
-        assert!(history.undo(&mut project));
-        assert_eq!(project.slides[0].transcript, "old1");
-        assert_eq!(project.slides[1].transcript, "old2");
-        assert!(history.redo(&mut project));
-        assert_eq!(project.slides[0].transcript, "01234");
-        assert_eq!(project.slides[1].transcript, "56789");
     }
 
     #[test]

@@ -22,7 +22,6 @@ Pythonは使用しません。
 - 右：文字起こし編集
 - ダーク／ライトテーマ
 - Undo / Redo（`Ctrl+Z` / `Ctrl+Y` / `Ctrl+Shift+Z`）
-- 文字起こしの再関連付け（Whisperの単語時刻を使用）
 
 ## ビルド要件
 

@@ -204,7 +204,7 @@ impl SlideVideoDividerApp {
                 if self.busy {
                     ui.add(egui::Spinner::new());
                 }
-                ui.label(&self.status);
+                ui.add(egui::Label::new(&self.status).truncate());
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                     if let Some(project) = &self.project {
                         ui.label(format!("スライド: {}", project.slides.len()));
@@ -238,10 +238,7 @@ impl SlideVideoDividerApp {
                             vec2(110.0, ui.spacing().interact_size.y),
                             egui::Label::new("動画ファイル"),
                         );
-                        ui.add(
-                            TextEdit::singleline(&mut self.video_path).desired_width(f32::INFINITY),
-                        );
-                        if ui.button("参照...").clicked()
+                        if path_edit(ui, &mut self.video_path, 72.0).1
                             && let Some(path) = rfd::FileDialog::new()
                                 .add_filter("動画", &["mp4", "mov", "mkv", "webm", "avi"])
                                 .pick_file()
@@ -255,11 +252,7 @@ impl SlideVideoDividerApp {
                             vec2(110.0, ui.spacing().interact_size.y),
                             egui::Label::new("出力フォルダ"),
                         );
-                        ui.add(
-                            TextEdit::singleline(&mut self.output_directory)
-                                .desired_width(f32::INFINITY),
-                        );
-                        if ui.button("参照...").clicked()
+                        if path_edit(ui, &mut self.output_directory, 72.0).1
                             && let Some(path) = rfd::FileDialog::new().pick_folder()
                         {
                             self.output_directory = path.to_string_lossy().to_string();
@@ -275,7 +268,7 @@ impl SlideVideoDividerApp {
                         .show(ui, |ui| {
                             ui.label("認識モデル");
                             ComboBox::from_id_salt("model-choice")
-                                .width(520.0)
+                                .width((ui.available_width() - 80.0).clamp(180.0, 520.0))
                                 .selected_text(MODEL_CHOICES[self.model_index].display_name)
                                 .show_ui(ui, |ui| {
                                     for (index, choice) in MODEL_CHOICES.iter().enumerate() {
@@ -300,11 +293,7 @@ impl SlideVideoDividerApp {
 
                             ui.label("モデルファイル");
                             ui.horizontal(|ui| {
-                                ui.add(
-                                    TextEdit::singleline(&mut self.model_path)
-                                        .desired_width(f32::INFINITY),
-                                );
-                                if ui.button("参照...").clicked()
+                                if path_edit(ui, &mut self.model_path, 190.0).1
                                     && let Some(path) = rfd::FileDialog::new()
                                         .add_filter("Whisperモデル", &["bin"])
                                         .pick_file()
@@ -351,7 +340,7 @@ impl SlideVideoDividerApp {
                             ui.add(
                                 TextEdit::multiline(&mut self.initial_prompt)
                                     .desired_rows(3)
-                                    .desired_width(620.0),
+                                    .desired_width(ui.available_width()),
                             );
                             ui.end_row();
                         });
@@ -377,7 +366,10 @@ impl SlideVideoDividerApp {
                         }
                     });
                     if let Some(progress) = self.progress {
-                        ui.add(egui::ProgressBar::new(progress / 100.0).desired_width(700.0));
+                        ui.add(
+                            egui::ProgressBar::new(progress / 100.0)
+                                .desired_width(ui.available_width()),
+                        );
                     }
                 });
         });
@@ -389,13 +381,23 @@ impl SlideVideoDividerApp {
             .as_ref()
             .map(|project| project.slides.clone())
             .unwrap_or_default();
+        let total_width = ui.available_width();
+        let compact = total_width < 900.0;
+        let left_default = if compact { 150.0 } else { 190.0 };
+        let right_default = if compact { 220.0 } else { 320.0 };
+        let left_max = (total_width * 0.28).max(150.0);
+        let right_max = (total_width * 0.38).max(220.0);
         Panel::left("slide-list")
-            .default_size(220.0)
+            .default_size(left_default)
+            .min_size(120.0)
+            .max_size(left_max)
             .resizable(true)
             .show(ui, |ui| {
                 ui.horizontal(|ui| {
                     ui.label("検索");
-                    ui.text_edit_singleline(&mut self.search);
+                    ui.add(
+                        TextEdit::singleline(&mut self.search).desired_width(ui.available_width()),
+                    );
                 });
                 ScrollArea::vertical().show(ui, |ui| {
                     for (index, slide) in slides.iter().enumerate() {
@@ -408,6 +410,7 @@ impl SlideVideoDividerApp {
                             continue;
                         }
                         let selected = self.selected_slide == Some(index);
+                        let thumb_width = (ui.available_width() - 4.0).clamp(96.0, 180.0);
                         let clicked =
                             if let Some(texture) = self.texture_for(ui.ctx(), &slide.image_path) {
                                 EguiFrame::NONE
@@ -424,7 +427,10 @@ impl SlideVideoDividerApp {
                                     .show(ui, |ui| {
                                         ui.add(
                                             Image::new(&texture)
-                                                .fit_to_exact_size(vec2(180.0, 101.0))
+                                                .fit_to_exact_size(vec2(
+                                                    thumb_width,
+                                                    thumb_width * 9.0 / 16.0,
+                                                ))
                                                 .sense(Sense::click()),
                                         )
                                     })
@@ -443,7 +449,9 @@ impl SlideVideoDividerApp {
             });
 
         Panel::right("transcript-panel")
-            .default_size(390.0)
+            .default_size(right_default)
+            .min_size(180.0)
+            .max_size(right_max)
             .resizable(true)
             .show(ui, |ui| {
                 if let Some(index) = self.selected_slide {
@@ -536,19 +544,6 @@ impl SlideVideoDividerApp {
                         minimum_font_size: self.settings.pdf_minimum_font_size,
                     });
                 }
-                if ui
-                    .add_enabled(
-                        !self.busy
-                            && self
-                                .project
-                                .as_ref()
-                                .is_some_and(|project| !project.segments.is_empty()),
-                        Button::new("再関連付け"),
-                    )
-                    .clicked()
-                {
-                    self.realign_project();
-                }
                 ui.separator();
                 if ui
                     .add_enabled(
@@ -632,33 +627,49 @@ impl SlideVideoDividerApp {
                     ui.checkbox(&mut self.settings.dark_mode, "ダークモード");
                 });
                 ui.separator();
-                egui::Grid::new("settings-grid").num_columns(2).spacing([8.0, 8.0]).show(ui, |ui| {
-                    ui.label("既定の出力先");
-                    ui.horizontal(|ui| {
-                        ui.add(TextEdit::singleline(&mut self.output_directory).desired_width(520.0));
-                        if ui.button("参照...").clicked()
-                            && let Some(path) = rfd::FileDialog::new().pick_folder() {
-                                self.output_directory = path.to_string_lossy().to_string();
-                            }
-                    });
-                    ui.end_row();
-                    ui.label("モデル保存先");
-                    ui.horizontal(|ui| {
-                        let mut model_directory = self.settings.model_directory.to_string_lossy().to_string();
-                        if ui.add(TextEdit::singleline(&mut model_directory).desired_width(520.0)).changed() {
-                            self.settings.model_directory = PathBuf::from(model_directory);
-                            self.model_path = self.settings.model_directory.join(MODEL_CHOICES[self.model_index].file_name).to_string_lossy().to_string();
-                        }
-                        if ui.button("参照...").clicked()
-                            && let Some(path) = rfd::FileDialog::new().pick_folder() {
-                                self.settings.model_directory = path;
-                                self.model_path = self.settings.model_directory.join(MODEL_CHOICES[self.model_index].file_name).to_string_lossy().to_string();
-                            }
-                    });
-                    ui.end_row();
+                ui.label("既定の出力先");
+                ui.horizontal(|ui| {
+                    if path_edit(ui, &mut self.output_directory, 72.0).1
+                        && let Some(path) = rfd::FileDialog::new().pick_folder()
+                    {
+                        self.output_directory = path.to_string_lossy().to_string();
+                    }
+                });
+                ui.add_space(6.0);
+                ui.label("モデル保存先");
+                let mut model_directory = self.settings.model_directory.to_string_lossy().to_string();
+                ui.horizontal(|ui| {
+                    let (changed, browse) = path_edit(ui, &mut model_directory, 72.0);
+                    if changed {
+                        self.settings.model_directory = PathBuf::from(&model_directory);
+                        self.model_path = self
+                            .settings
+                            .model_directory
+                            .join(MODEL_CHOICES[self.model_index].file_name)
+                            .to_string_lossy()
+                            .to_string();
+                    }
+                    if browse
+                        && let Some(path) = rfd::FileDialog::new().pick_folder()
+                    {
+                        self.settings.model_directory = path;
+                        self.model_path = self
+                            .settings
+                            .model_directory
+                            .join(MODEL_CHOICES[self.model_index].file_name)
+                            .to_string_lossy()
+                            .to_string();
+                    }
+                });
+                ui.add_space(6.0);
+                ui.horizontal(|ui| {
                     ui.label("PDF最小フォント");
-                    ui.add(DragValue::new(&mut self.settings.pdf_minimum_font_size).speed(0.25).range(5.0..=10.0).suffix(" pt"));
-                    ui.end_row();
+                    ui.add(
+                        DragValue::new(&mut self.settings.pdf_minimum_font_size)
+                            .speed(0.25)
+                            .range(5.0..=10.0)
+                            .suffix(" pt"),
+                    );
                 });
                 ui.label(RichText::new("小さい値ほど多くの文字を1ページに収められます。").weak());
                 ui.separator();
@@ -679,6 +690,8 @@ impl SlideVideoDividerApp {
         egui::Window::new("PDF出力オプション")
             .collapsible(false)
             .resizable(false)
+            .default_width(360.0)
+            .max_width((ctx.content_rect().width() - 48.0).max(300.0))
             .open(&mut open)
             .show(ctx, |ui| {
                 ui.label("PDFに含める内容");
@@ -737,6 +750,8 @@ impl SlideVideoDividerApp {
         egui::Window::new(message.title.clone())
             .collapsible(false)
             .resizable(false)
+            .default_width(360.0)
+            .max_width((ctx.content_rect().width() - 48.0).max(300.0))
             .open(&mut open)
             .show(ctx, |ui| {
                 ui.label(&message.text);
@@ -1068,24 +1083,6 @@ impl SlideVideoDividerApp {
         {
             slide.transcript = self.transcript_buffer.clone();
         }
-    }
-
-    fn realign_project(&mut self) {
-        self.commit_transcript();
-        let Some(project) = self.project.as_mut() else {
-            return;
-        };
-        let old_texts = project
-            .slides
-            .iter()
-            .map(|slide| slide.transcript.clone())
-            .collect();
-        let command = EditCommand::ReassignTranscripts { old_texts };
-        command.apply(project);
-        self.history.push(command);
-        self.dirty = true;
-        self.reload_selected();
-        self.status = "文字起こしをスライドへ再関連付けしました".to_string();
     }
 
     fn move_transcript(&mut self, direction: i32) {
@@ -1454,6 +1451,16 @@ fn install_fonts(ctx: &Context) {
         .unwrap()
         .push("M PLUS 1p".to_string());
     ctx.set_fonts(fonts);
+}
+
+fn path_edit(ui: &mut egui::Ui, value: &mut String, trailing_width: f32) -> (bool, bool) {
+    let spacing = ui.spacing().item_spacing.x;
+    let width = (ui.available_width() - trailing_width - spacing).max(80.0);
+    let response = ui.add_sized(
+        vec2(width, ui.spacing().interact_size.y),
+        TextEdit::singleline(value),
+    );
+    (response.changed(), ui.button("参照...").clicked())
 }
 
 fn format_time(seconds: f64) -> String {
