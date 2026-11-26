@@ -3,7 +3,7 @@ pub mod transcribe;
 
 use crate::model::{ModelChoice, Project};
 use crate::project;
-use anyhow::Result;
+use anyhow::{Result, anyhow};
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
@@ -98,7 +98,7 @@ pub fn run_pipeline(mut request: PipelineRequest, ctx: &PipelineContext) -> Resu
         &ctx.cancel,
     )?;
     ctx.status("スライド画像を抽出しています...");
-    let slides = ffmpeg::extract_slides(
+    let mut slides = ffmpeg::extract_slides(
         &request.video_path,
         &boundaries,
         duration,
@@ -114,15 +114,47 @@ pub fn run_pipeline(mut request: PipelineRequest, ctx: &PipelineContext) -> Resu
     ctx.overall(45.0);
     transcribe::ensure_model(&request.model, &request.model_path, ctx)?;
     ctx.overall(50.0);
-    let segments = transcribe::transcribe(
+    let ranges: Vec<(f64, f64)> = slides
+        .iter()
+        .map(|slide| (slide.start, slide.end))
+        .collect();
+    let transcripts = transcribe::transcribe_slides(
         &wav_path,
         &request.model_path,
         request.use_gpu,
         &request.initial_prompt,
+        &ranges,
         ctx,
     )?;
     ctx.overall(96.0);
-    ctx.status("文字起こしをスライドへ対応付けています...");
+    let mut segments = Vec::new();
+    let mut slide_texts = vec![String::new(); slides.len()];
+    for transcript in transcripts {
+        let text = transcript
+            .segments
+            .iter()
+            .map(|segment| segment.text.as_str())
+            .collect::<Vec<_>>()
+            .join("\n");
+        if let Some(slot) = slide_texts.get_mut(transcript.index) {
+            *slot = project::normalize_transcript(&text);
+        }
+        segments.extend(transcript.segments);
+    }
+    if slide_texts.iter().all(|text| text.is_empty()) {
+        return Err(anyhow!(
+            "文字起こし結果が空でした。音声の有無・言語設定を確認してください。"
+        ));
+    }
+    segments.sort_by(|a, b| {
+        a.start
+            .partial_cmp(&b.start)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+    for (slide, text) in slides.iter_mut().zip(slide_texts) {
+        slide.transcript = text;
+    }
+    ctx.status("プロジェクトを保存しています...");
     let mut project = Project {
         version: 1,
         video_path: request.video_path,
@@ -134,7 +166,6 @@ pub fn run_pipeline(mut request: PipelineRequest, ctx: &PipelineContext) -> Resu
         segments,
         project_path: None,
     };
-    project::assign_transcripts(&mut project);
     let project_path = project::default_project_path(&output_directory, &project.video_path);
     project::save(&project_path, &mut project)?;
     let _ = std::fs::remove_file(&wav_path);

@@ -1,4 +1,4 @@
-use crate::model::{Project, Slide};
+use crate::model::Project;
 use anyhow::{Context, Result};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -9,61 +9,6 @@ pub fn normalize_transcript(text: &str) -> String {
         .filter(|line| !line.is_empty())
         .collect::<Vec<_>>()
         .join("\n")
-}
-
-pub fn assign_transcripts(project: &mut Project) {
-    for slide in &mut project.slides {
-        slide.transcript.clear();
-    }
-    let mut segments = project.segments.clone();
-    segments.sort_by(|a, b| {
-        a.start
-            .partial_cmp(&b.start)
-            .unwrap_or(std::cmp::Ordering::Equal)
-    });
-    for segment in segments {
-        let text = normalize_transcript(&segment.text);
-        if text.is_empty() {
-            continue;
-        }
-        if let Some(index) = best_slide_index(&project.slides, segment.start, segment.end) {
-            let slide = &mut project.slides[index];
-            if slide.transcript.is_empty() {
-                slide.transcript = text;
-            } else {
-                slide.transcript.push('\n');
-                slide.transcript.push_str(&text);
-            }
-        }
-    }
-    for slide in &mut project.slides {
-        slide.transcript = normalize_transcript(&slide.transcript);
-    }
-}
-
-fn best_slide_index(slides: &[Slide], start: f64, end: f64) -> Option<usize> {
-    let mut best = None;
-    let mut best_overlap = 0.0;
-    for (index, slide) in slides.iter().enumerate() {
-        let overlap = end.min(slide.end) - start.max(slide.start);
-        if overlap > 0.0 && (best.is_none() || overlap > best_overlap) {
-            best = Some(index);
-            best_overlap = overlap;
-        }
-    }
-    if best.is_some() {
-        return best;
-    }
-    slides
-        .iter()
-        .position(|slide| start >= slide.start && start < slide.end)
-        .or_else(|| {
-            if start >= slides.last().map_or(0.0, |s| s.end) {
-                slides.len().checked_sub(1)
-            } else {
-                Some(0)
-            }
-        })
 }
 
 pub fn default_project_path(output_directory: &Path, video_path: &Path) -> PathBuf {
@@ -131,6 +76,7 @@ fn pathdiff(path: &Path, base: &Path) -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::model::Slide;
 
     #[test]
     fn removes_blank_lines() {
