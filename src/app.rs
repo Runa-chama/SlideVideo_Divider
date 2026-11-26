@@ -210,7 +210,7 @@ impl SlideVideoDividerApp {
         apply_title_bar(frame, self.settings.dark_mode);
         self.handle_shortcuts(&ctx);
         self.drain_events(&ctx);
-        self.drain_update_events(&ctx);
+        self.drain_update_events();
         if !self.update_checked {
             self.update_checked = true;
             if self.settings.check_updates || self.auto_update {
@@ -1526,7 +1526,7 @@ impl SlideVideoDividerApp {
         });
     }
 
-    fn drain_update_events(&mut self, ctx: &Context) {
+    fn drain_update_events(&mut self) {
         let events: Vec<UpdateEvent> = self
             .update_receiver
             .as_ref()
@@ -1564,7 +1564,8 @@ impl SlideVideoDividerApp {
                     match update::launch_installer(&path) {
                         Ok(()) => {
                             self.status = "更新を適用します...".to_string();
-                            ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+                            // ファイルのロックを解放してからサイレントインストーラを実行する。
+                            std::process::exit(0);
                         }
                         Err(error) => {
                             self.message = Some(MessageState {

@@ -129,13 +129,19 @@ pub fn download_installer(
 /// サイレント更新を起動し、完了後にアプリを再起動する。
 pub fn launch_installer(path: &Path) -> Result<()> {
     let app = std::env::current_exe().context("実行ファイルの場所を取得できませんでした")?;
-    let command = format!(
-        "\"{}\" /SILENT /NORESTART /CLOSEAPPLICATIONS && start \"\" \"{}\"",
+    let directory = std::env::temp_dir().join("SlideVideoDivider-update");
+    std::fs::create_dir_all(&directory).context("更新用フォルダを作成できませんでした")?;
+    let script = directory.join("apply-update.cmd");
+    // cmd.exe へ複雑な引用符付きコマンドを直接渡すと引数解釈が崩れるため、
+    // 更新→再起動の手順をバッチファイルに書き出して実行する。
+    let batch = format!(
+        "@echo off\r\nstart \"\" /wait \"{}\" /SILENT /NORESTART /CLOSEAPPLICATIONS\r\nif errorlevel 1 exit /b 1\r\nstart \"\" \"{}\"\r\n",
         path.display(),
         app.display()
     );
+    std::fs::write(&script, batch).context("更新用バッチファイルを作成できませんでした")?;
     let mut process = std::process::Command::new("cmd");
-    process.args(["/C", &command]);
+    process.arg("/C").arg(&script);
     #[cfg(target_os = "windows")]
     {
         use std::os::windows::process::CommandExt;
