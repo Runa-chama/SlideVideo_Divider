@@ -7,6 +7,9 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
+#[cfg(target_os = "windows")]
+use std::os::windows::process::CommandExt;
+
 use crate::model::Slide;
 
 #[derive(Debug, Clone, Copy)]
@@ -234,11 +237,15 @@ pub fn check_cancel(cancel: &Arc<AtomicBool>) -> Result<()> {
 
 fn run_command(program: &Path, arguments: &[&str], cancel: &Arc<AtomicBool>) -> Result<Output> {
     check_cancel(cancel)?;
-    let mut child = Command::new(program)
+    let mut command = Command::new(program);
+    command
         .args(arguments)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
+        .stderr(Stdio::piped());
+    #[cfg(target_os = "windows")]
+    command.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
+    let mut child = command
         .spawn()
         .with_context(|| format!("プロセスを開始できません: {}", program.display()))?;
     let stdout = child.stdout.take();

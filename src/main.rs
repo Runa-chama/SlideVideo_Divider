@@ -1,3 +1,5 @@
+#![cfg_attr(target_os = "windows", windows_subsystem = "windows")]
+
 use slide_video_divider::app;
 use std::path::PathBuf;
 
