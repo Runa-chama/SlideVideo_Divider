@@ -1,5 +1,6 @@
 bin/
 obj/
+!src/bin/
 target/
 smoke-output/
 publish/
@@ -10,7 +11,9 @@ models/
 *.suo
 TestResults/
 
-
 # Added by cargo
 
 /target
+
+installer/staging/
+dist/

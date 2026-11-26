@@ -1,9 +1,11 @@
+use crate::gpu::{self, GpuInfo};
 use crate::history::{EditCommand, EditHistory};
 use crate::model::{MODEL_CHOICES, PdfExportMode, PdfOptions, Project};
 use crate::pdf;
 use crate::pipeline::{self, PipelineContext, PipelineEvent, PipelineRequest};
 use crate::project;
 use crate::settings::AppSettings;
+use crate::update;
 use eframe::{App, CreationContext, Frame};
 use egui::{
     Align, Button, Color32, ComboBox, Context, CornerRadius, DragValue, Frame as EguiFrame, Image,
@@ -36,6 +38,12 @@ struct MessageState {
     text: String,
 }
 
+enum UpdateEvent {
+    Checked(Result<Option<update::ReleaseInfo>, String>),
+    Progress(f32),
+    Downloaded(Result<PathBuf, String>),
+}
+
 pub struct SlideVideoDividerApp {
     settings: AppSettings,
     tab: Tab,
@@ -51,6 +59,7 @@ pub struct SlideVideoDividerApp {
     output_directory: String,
     model_index: usize,
     model_path: String,
+    gpu: Option<GpuInfo>,
     use_gpu: bool,
     scene_threshold: f64,
     minimum_slide_seconds: f64,
@@ -65,6 +74,10 @@ pub struct SlideVideoDividerApp {
     pdf_dialog: Option<PdfDialogState>,
     message: Option<MessageState>,
     textures: HashMap<PathBuf, TextureHandle>,
+    update_available: Option<update::ReleaseInfo>,
+    update_receiver: Option<Receiver<UpdateEvent>>,
+    update_progress: Option<f32>,
+    update_checked: bool,
 }
 
 impl SlideVideoDividerApp {
@@ -75,7 +88,8 @@ impl SlideVideoDividerApp {
         let model_index = settings
             .model_index
             .min(MODEL_CHOICES.len().saturating_sub(1));
-        let use_gpu = settings.use_gpu && cfg!(feature = "cuda");
+        let gpu = gpu::detect_gpu();
+        let use_gpu = settings.use_gpu && gpu.is_some();
         let model_path = settings
             .model_directory
             .join(MODEL_CHOICES[model_index].file_name);
@@ -114,6 +128,7 @@ impl SlideVideoDividerApp {
             search: String::new(),
             model_index,
             model_path: model_path.to_string_lossy().to_string(),
+            gpu,
             use_gpu,
             scene_threshold: settings.scene_threshold,
             minimum_slide_seconds: settings.minimum_slide_seconds,
@@ -127,6 +142,10 @@ impl SlideVideoDividerApp {
             pdf_dialog: None,
             message: None,
             textures: HashMap::new(),
+            update_available: None,
+            update_receiver: None,
+            update_progress: None,
+            update_checked: false,
             settings,
         }
     }
@@ -185,6 +204,13 @@ impl SlideVideoDividerApp {
         apply_title_bar(frame, self.settings.dark_mode);
         self.handle_shortcuts(&ctx);
         self.drain_events(&ctx);
+        self.drain_update_events(&ctx);
+        if !self.update_checked {
+            self.update_checked = true;
+            if self.settings.check_updates {
+                self.start_update_check();
+            }
+        }
         self.handle_dropped_files(&ctx);
         self.sync_settings();
 
@@ -196,6 +222,19 @@ impl SlideVideoDividerApp {
                 ui.selectable_value(&mut self.tab, Tab::Convert, "変換");
                 ui.selectable_value(&mut self.tab, Tab::Notes, "スライドノート");
                 ui.selectable_value(&mut self.tab, Tab::Settings, "設定");
+                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                    ui.add_space(8.0);
+                    if let Some(version) = self
+                        .update_available
+                        .as_ref()
+                        .map(|release| release.version.clone())
+                        && ui
+                            .add_enabled(!self.busy, Button::new(format!("v{version} に更新")))
+                            .clicked()
+                    {
+                        self.start_update_download();
+                    }
+                });
             });
         });
 
@@ -209,7 +248,9 @@ impl SlideVideoDividerApp {
                     if let Some(project) = &self.project {
                         ui.label(format!("スライド: {}", project.slides.len()));
                     }
-                    if let Some(progress) = self.progress {
+                    if let Some(progress) = self.update_progress {
+                        ui.add(egui::ProgressBar::new(progress / 100.0).desired_width(140.0));
+                    } else if let Some(progress) = self.progress {
                         ui.add(egui::ProgressBar::new(progress / 100.0).desired_width(160.0));
                     }
                 });
@@ -315,7 +356,21 @@ impl SlideVideoDividerApp {
                             ui.end_row();
 
                             ui.label("実行デバイス");
-                            ui.checkbox(&mut self.use_gpu, "NVIDIA GPU（CUDA）を使用");
+                            match &self.gpu {
+                                Some(gpu) => {
+                                    ui.vertical(|ui| {
+                                        ui.checkbox(&mut self.use_gpu, "GPUを使用");
+                                        ui.label(
+                                            RichText::new(format!("検出: {}", gpu.name)).weak(),
+                                        );
+                                    });
+                                }
+                                None => {
+                                    ui.label(
+                                        RichText::new("GPU非検出のためCPUで実行します").weak(),
+                                    );
+                                }
+                            }
                             ui.end_row();
 
                             ui.label("切替検出しきい値");
@@ -673,8 +728,61 @@ impl SlideVideoDividerApp {
                 });
                 ui.label(RichText::new("小さい値ほど多くの文字を1ページに収められます。").weak());
                 ui.separator();
+                ui.heading("更新");
+                ui.label(format!("現在のバージョン: {}", update::current_version()));
+                ui.checkbox(
+                    &mut self.settings.check_updates,
+                    "起動時に更新を確認する",
+                );
+                ui.horizontal(|ui| {
+                    if ui
+                        .add_enabled(
+                            !self.busy && self.update_progress.is_none(),
+                            Button::new("今すぐ確認"),
+                        )
+                        .clicked()
+                    {
+                        self.start_update_check();
+                    }
+                    if let Some(version) = self
+                        .update_available
+                        .as_ref()
+                        .map(|release| release.version.clone())
+                        && ui
+                            .add_enabled(
+                                !self.busy && self.update_progress.is_none(),
+                                Button::new(format!("v{version} へ更新")),
+                            )
+                            .clicked()
+                    {
+                        self.start_update_download();
+                    }
+                });
+                if let Some(progress) = self.update_progress {
+                    ui.add(
+                        egui::ProgressBar::new(progress / 100.0)
+                            .desired_width(ui.available_width())
+                            .text(format!("{progress:.0}%")),
+                    );
+                }
+                if let Some(release) = &self.update_available {
+                    ui.add_space(4.0);
+                    ui.label(
+                        RichText::new(format!(
+                            "バージョン {} が利用可能です。",
+                            release.version
+                        ))
+                        .strong(),
+                    );
+                    if !release.notes.trim().is_empty() {
+                        ScrollArea::vertical().max_height(120.0).show(ui, |ui| {
+                            ui.label(RichText::new(release.notes.trim()).weak());
+                        });
+                    }
+                }
+                ui.separator();
                 ui.heading("このアプリについて");
-                ui.label("SlideVideoDivider 0.1.0");
+                ui.label(format!("SlideVideoDivider {}", update::current_version()));
                 ui.label("処理はすべてローカルで実行されます。音声や動画は外部サービスへ送信されません。");
             });
         });
@@ -922,7 +1030,7 @@ impl SlideVideoDividerApp {
         if pipeline::ffmpeg::find_ffmpeg().is_none() {
             self.message = Some(MessageState {
                 title: "FFmpegエラー".to_string(),
-                text: "FFmpegが見つかりません。PATHを確認してください".to_string(),
+                text: "FFmpegが見つかりません。toolsフォルダかPATHを確認してください".to_string(),
             });
             return;
         }
@@ -945,7 +1053,7 @@ impl SlideVideoDividerApp {
             output_root: PathBuf::from(self.output_directory.trim()),
             model: MODEL_CHOICES[self.model_index].clone(),
             model_path: PathBuf::from(self.model_path.trim()),
-            use_gpu: self.use_gpu,
+            use_gpu: self.use_gpu && self.gpu.is_some(),
             initial_prompt: self.initial_prompt.clone(),
             scene_threshold: self.scene_threshold,
             minimum_slide_seconds: self.minimum_slide_seconds,
@@ -1378,10 +1486,103 @@ impl SlideVideoDividerApp {
         Some(texture)
     }
 
+    fn start_update_check(&mut self) {
+        let (sender, receiver) = channel();
+        self.update_receiver = Some(receiver);
+        std::thread::spawn(move || {
+            let result = update::check_for_update().map_err(|error| error.to_string());
+            let _ = sender.send(UpdateEvent::Checked(result));
+        });
+    }
+
+    fn start_update_download(&mut self) {
+        let Some(release) = self.update_available.clone() else {
+            return;
+        };
+        if self.busy || self.update_progress.is_some() {
+            return;
+        }
+        let (sender, receiver) = channel();
+        self.update_receiver = Some(receiver);
+        self.update_progress = Some(0.0);
+        self.status = format!("更新 {} をダウンロードしています...", release.version);
+        std::thread::spawn(move || {
+            let cancel = Arc::new(AtomicBool::new(false));
+            let progress_sender = sender.clone();
+            let result = update::download_installer(&release, &cancel, &mut |written, total| {
+                if let Some(total) = total.filter(|total| *total > 0) {
+                    let percent = (written as f64 / total as f64 * 100.0) as f32;
+                    let _ = progress_sender.send(UpdateEvent::Progress(percent));
+                }
+            })
+            .map_err(|error| error.to_string());
+            let _ = sender.send(UpdateEvent::Downloaded(result));
+        });
+    }
+
+    fn drain_update_events(&mut self, ctx: &Context) {
+        let events: Vec<UpdateEvent> = self
+            .update_receiver
+            .as_ref()
+            .map(|receiver| receiver.try_iter().collect())
+            .unwrap_or_default();
+        for event in events {
+            match event {
+                UpdateEvent::Checked(Ok(Some(release))) => {
+                    if !self.busy {
+                        self.status =
+                            format!("新しいバージョン {} が利用可能です", release.version);
+                    }
+                    self.update_available = Some(release);
+                }
+                UpdateEvent::Checked(Ok(None)) => {
+                    self.update_available = None;
+                    if !self.busy {
+                        self.status = "最新のバージョンを使用しています".to_string();
+                    }
+                }
+                UpdateEvent::Checked(Err(message)) => {
+                    if !self.busy {
+                        self.status = format!("更新を確認できませんでした: {message}");
+                    }
+                }
+                UpdateEvent::Progress(percent) => {
+                    self.update_progress = Some(percent);
+                    self.status = format!("更新をダウンロードしています... {percent:.0}%");
+                }
+                UpdateEvent::Downloaded(Ok(path)) => {
+                    self.update_progress = None;
+                    match update::launch_installer(&path) {
+                        Ok(()) => {
+                            self.status = "更新を適用します...".to_string();
+                            ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+                        }
+                        Err(error) => {
+                            self.message = Some(MessageState {
+                                title: "更新エラー".to_string(),
+                                text: error.to_string(),
+                            });
+                        }
+                    }
+                }
+                UpdateEvent::Downloaded(Err(message)) => {
+                    self.update_progress = None;
+                    self.status = "更新のダウンロードに失敗しました".to_string();
+                    self.message = Some(MessageState {
+                        title: "更新エラー".to_string(),
+                        text: message,
+                    });
+                }
+            }
+        }
+    }
+
     fn sync_settings(&mut self) {
         self.settings.output_directory = PathBuf::from(self.output_directory.trim());
         self.settings.model_index = self.model_index;
-        self.settings.use_gpu = self.use_gpu;
+        if self.gpu.is_some() {
+            self.settings.use_gpu = self.use_gpu;
+        }
         self.settings.scene_threshold = self.scene_threshold;
         self.settings.minimum_slide_seconds = self.minimum_slide_seconds;
         self.settings.initial_prompt = self.initial_prompt.clone();

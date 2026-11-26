@@ -1,0 +1,27 @@
+SlideVideoDivider サードパーティ通知
+====================================
+
+本アプリケーションは以下のオープンソースソフトウェアを利用しています。
+
+FFmpeg / FFprobe
+----------------
+License: LGPL v3 (gyan.dev essentials build)
+Source: https://ffmpeg.org/ , https://www.gyan.dev/ffmpeg/builds/
+FFmpeg は動画の解析・スライド画像の抽出・音声変換に使用しています。
+同梱バイナリのライセンス全文は tools\FFMPEG-LICENSE.txt を参照してください。
+
+whisper.cpp / whisper-rs
+------------------------
+License: MIT
+Source: https://github.com/ggerganov/whisper.cpp , https://github.com/tazz4843/whisper-rs
+音声認識に使用しています。
+
+egui / eframe / wgpu ほか Rust クレート
+--------------------------------------
+License: MIT または Apache-2.0
+Source: https://github.com/emilk/egui ほか各クレートのリポジトリ
+
+M PLUS 1 (フォント)
+-------------------
+License: SIL Open Font License 1.1
+Source: https://github.com/coz-m/MPLUS_FONTS

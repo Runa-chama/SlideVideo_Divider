@@ -7,11 +7,12 @@ Pythonは使用しません。
 ## 技術構成
 
 - UI：eframe / egui
-- 音声認識：whisper-rs（whisper.cpp）
+- 音声認識：whisper-rs（whisper.cpp / Vulkan GPU）
 - 動画・音声処理：FFmpeg / FFprobe
 - PDF：printpdf
 - 画像・文字描画：image / imageproc / ab_glyph
 - 設定・プロジェクト：serde / JSON
+- 自動更新：GitHub Releases API
 
 ## 画面
 
@@ -30,7 +31,7 @@ Pythonは使用しません。
 - LLVM / libclang
 - CMake
 - FFmpeg / FFprobe（PATHに追加）
-- CUDA Toolkit 12.4以降（GPU版）
+- Vulkan SDK 1.3以降（GPU版）
 - Microsoft Visual C++ Redistributable 2022 x64
 
 whisper-rsはビルド時にlibclangを使用します。LLVMを導入し、必要に応じて `LIBCLANG_PATH` を設定してください。
@@ -40,13 +41,12 @@ winget install --id LLVM.LLVM --exact
 $env:LIBCLANG_PATH = 'C:\Program Files\LLVM\bin'
 ```
 
-Visual Studio 2026とCUDA 12.9の組み合わせはNVCCに未対応です。CUDA 13.4以降を推奨します。同梱の `run-rust.ps1` はCUDA 13.4を優先的に選択します。
+GPU版はVulkanバックエンドを使用します。Vulkan SDKを導入すると `VULKAN_SDK` が設定されます。同梱の `run-rust.ps1` は `C:\VulkanSDK` 配下のSDKを自動検出してビルドします。
 
 ## GPU版ビルド
 
 ```powershell
-$env:CMAKE_CUDA_ARCHITECTURES = "86;89"
-cargo build --release --features cuda
+cargo build --release
 ```
 
 出力：
@@ -55,7 +55,7 @@ cargo build --release --features cuda
 target\release\SlideVideoDivider.exe
 ```
 
-GPU初期化に失敗した場合はCPUへフォールバックします。
+起動時にGPUを自動検出します。GPUがある場合は設定画面でGPU実行を選択でき、GPUがない場合はCPUで実行します。GPU初期化に失敗した場合もCPUへフォールバックします。
 
 ## CPU版ビルド
 
@@ -66,10 +66,10 @@ cargo build --release --no-default-features
 ## 起動
 
 ```powershell
-cargo run --release --features cuda
+cargo run --release
 ```
 
-または、CUDA 13.4を優先的に選択する同梱スクリプト：
+または、Vulkan SDKを自動検出する同梱スクリプト：
 
 ```powershell
 .\run-rust.ps1
@@ -109,10 +109,39 @@ PDF出力時に次のモードを選択できます。
 cargo fmt --all -- --check
 cargo clippy --all-targets --no-default-features -- -D warnings
 cargo test --no-default-features
+cargo clippy --release --all-targets -- -D warnings
+cargo test --release
 
 # 実動画のエンドツーエンド確認
 cargo run --release --no-default-features --bin smoke -- --video "<動画ファイルのパス>" --model "<whisper-model.bin>" --model-index 4 --cpu --pdf
 ```
+
+Vulkan版のビルドでは、リポジトリのパスが深いとWindowsのパス長制限でシェーダ生成が失敗します。その場合は短いパスを指定してください。
+
+```powershell
+$env:CARGO_TARGET_DIR = "$env:USERPROFILE\svd"
+cargo build --release
+```
+
+## インストーラ
+
+`installer\build-installer.ps1` でInno Setup用のインストーラを作成します。FFmpeg / FFprobeは自動でダウンロードして同梱されます。
+
+```powershell
+cargo build --release
+.\installer\build-installer.ps1 -Version 0.1.0
+```
+
+出力：`dist\SlideVideoDivider-0.1.0-setup.exe`
+
+インストール先はユーザー単位（`%LOCALAPPDATA%\Programs\SlideVideoDivider`）で、管理者権限は不要です。
+
+## 自動更新
+
+起動時にGitHub Releasesの最新版を確認し、新しいバージョンがあれば画面上部に更新ボタンを表示します。ボタンを押すとインストーラをダウンロードしてサイレント更新し、アプリを再起動します。
+
+- 設定タブから「今すぐ確認」で手動確認も可能
+- 起動時の確認は設定タブで無効化可能
 
 ## ライセンス
 
@@ -120,3 +149,4 @@ cargo run --release --no-default-features --bin smoke -- --video "<動画ファ�
 - whisper-rs：Unlicense
 - eframe / egui：MIT / Apache-2.0
 - printpdf：MIT
+- FFmpeg / FFprobe（インストーラに同梱）：LGPL v3

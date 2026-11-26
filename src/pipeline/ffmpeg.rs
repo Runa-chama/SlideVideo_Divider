@@ -32,9 +32,16 @@ pub fn find_ffprobe() -> Option<PathBuf> {
 }
 
 fn find_tool(name: &str) -> Option<PathBuf> {
-    let local = PathBuf::from("tools").join(name);
-    if local.is_file() {
-        return Some(local);
+    let mut candidates = Vec::new();
+    if let Ok(executable) = std::env::current_exe()
+        && let Some(directory) = executable.parent()
+    {
+        candidates.push(directory.join("tools").join(name));
+        candidates.push(directory.join(name));
+    }
+    candidates.push(PathBuf::from("tools").join(name));
+    if let Some(found) = candidates.into_iter().find(|path| path.is_file()) {
+        return Some(found);
     }
     std::env::var_os("PATH").and_then(|paths| {
         std::env::split_paths(&paths).find_map(|directory| {

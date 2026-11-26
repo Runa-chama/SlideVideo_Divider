@@ -16,6 +16,12 @@ pub struct AppSettings {
     pub model_index: usize,
     pub pdf_minimum_font_size: f64,
     pub pdf_export_mode: PdfExportMode,
+    #[serde(default = "default_true")]
+    pub check_updates: bool,
+}
+
+fn default_true() -> bool {
+    true
 }
 
 impl Default for AppSettings {
@@ -34,6 +40,7 @@ impl Default for AppSettings {
             model_index: 0,
             pdf_minimum_font_size: 6.5,
             pdf_export_mode: PdfExportMode::Combined,
+            check_updates: true,
         }
     }
 }
